@@ -668,24 +668,13 @@ HitInfo RayBucketWithMatrix(float3 rayPos, float3 rayDir, float4x4 localToWorld,
                     float densityStepSize = lightStepSize * (i + 1); // increase step size with each iteration
                     bool searchForNextFluidEntryPoint = !travellingThroughFluid;
 
-                    HitInfo bucketHit = RayBucketWithMatrix(rayPos, rayDir, cubeLocalToWorld, cubeWorldToLocal);
-                    SurfaceInfo surfaceInfo = FindNextSurface(rayPos, rayDir, searchForNextFluidEntryPoint, rngState, i == 0 ? 1 : 0, bucketHit.dst);
-                    bool useBucketHit = bucketHit.didHit && bucketHit.dst < length(surfaceInfo.pos - rayPos);
+                    float disabledCubeDst = 1.#INF;
+                    SurfaceInfo surfaceInfo = FindNextSurface(rayPos, rayDir, searchForNextFluidEntryPoint, rngState, i == 0 ? 1 : 0, disabledCubeDst);
+                    bool useCubeHit = false;
                     if (!surfaceInfo.foundSurface) break;
 
                     transmittance *= Transmittance(surfaceInfo.densityAlongRay);
 
-                    // Hit test cube
-                    if (useBucketHit)
-                    {
-                        if (travellingThroughFluid)
-                        {
-                            transmittance *= Transmittance(CalculateDensityAlongRay(bucketHit.hitPoint, bucketHit.normal, densityStepSize));
-                        }
-                        light += Light(rayPos, rayDir) * transmittance;
-                        transmittance = 0;
-                        break;
-                    }
                     // If light hits the floor it will be scattered in all directions (in hemisphere)
                     // Not sure how to handle this in real-time, so just break out of loop here
                     if (surfaceInfo.pos.y < -boundsSize.y / 2 + 0.05)
