@@ -100,61 +100,58 @@ float Remap01(float val, float minVal, float maxVal)
 
 float BucketRadiusAtY(float y)
 {
-    // local space range is approximately -0.5 to +0.5
+    // local space تقريبا من -0.5 إلى +0.5
     float t = saturate((y + 0.5) / 1.0);
 
-    // bottom radius smaller, top radius larger
+    // لا ترفع topRadius فوق 0.5 حتى لا ينقص الرندر من الأطراف
     float bottomRadius = 0.24;
-    float topRadius = 0.46;
+    float topRadius = 0.38;
 
     return lerp(bottomRadius, topRadius, t);
 }
 
 void ResolveCollisions(inout float3 pos, inout float3 vel, float collisionDamping)
 {
-    // Transform position/velocity to local space of the simulation object
     float3 posLocal = mul(worldToLocal, float4(pos, 1)).xyz;
-    float3 velocityLocal = mul(worldToLocal, float4(vel, 0)).xyz;
+    float3 velLocal = mul(worldToLocal, float4(vel, 0)).xyz;
 
     float bottomY = -0.5;
     float topY = 0.5;
 
-    // Bottom collision
+    // أرضية الدلو
     if (posLocal.y < bottomY)
     {
         posLocal.y = bottomY;
-        velocityLocal.y = abs(velocityLocal.y) * collisionDamping;
+        velLocal.y = abs(velLocal.y) * collisionDamping;
     }
 
-    // Temporary top limit for stability.
-    // Later, when we add paint pouring, we can open a hole or outlet.
+    // حد علوي مؤقت حتى لا يطير السائل
     if (posLocal.y > topY)
     {
         posLocal.y = topY;
-        velocityLocal.y = -abs(velocityLocal.y) * collisionDamping;
+        velLocal.y = -abs(velLocal.y) * collisionDamping;
     }
 
-    // Conical bucket side collision
+    // جدار الدلو المخروطي
     float2 xz = posLocal.xz;
     float r = length(xz);
     float allowedR = BucketRadiusAtY(posLocal.y);
 
     if (r > allowedR)
     {
-        float2 normalXZ = r > 0.0001 ? xz / r : float2(1, 0);
+        float2 n = r > 0.0001 ? xz / r : float2(1, 0);
 
-        posLocal.xz = normalXZ * allowedR;
+        posLocal.xz = n * allowedR;
 
-        float outwardSpeed = dot(velocityLocal.xz, normalXZ);
+        float outwardSpeed = dot(velLocal.xz, n);
         if (outwardSpeed > 0)
         {
-            velocityLocal.xz -= (1 + collisionDamping) * outwardSpeed * normalXZ;
+            velLocal.xz -= (1 + collisionDamping) * outwardSpeed * n;
         }
     }
 
-    // Transform back to world space
     pos = mul(localToWorld, float4(posLocal, 1)).xyz;
-    vel = mul(localToWorld, float4(velocityLocal, 0)).xyz;
+    vel = mul(localToWorld, float4(velLocal, 0)).xyz;
 }
 
 [numthreads(ThreadGroupSize, 1, 1)]

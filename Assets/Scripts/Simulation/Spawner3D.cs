@@ -26,7 +26,8 @@ namespace Seb.Fluid.Simulation
 			foreach (SpawnRegion region in spawnRegions)
 			{
 				int particlesPerAxis = region.CalculateParticleCountPerAxis(particleSpawnDensity);
-				(float3[] points, float3[] velocities) = SpawnCube(particlesPerAxis, region.centre, Vector3.one * region.size);
+				//(float3[] points, float3[] velocities) = SpawnCube(particlesPerAxis, region.centre, Vector3.one * region.size);
+				(float3[] points, float3[] velocities) = SpawnBucket(particlesPerAxis, region.centre, region.size);
 				allPoints.AddRange(points);
 				allVelocities.AddRange(velocities);
 			}
@@ -66,7 +67,47 @@ namespace Seb.Fluid.Simulation
 			return (points, velocities);
 		}
 
+		(float3[] p, float3[] v) SpawnBucket(int numPerAxis, Vector3 centre, float size)
+		{
+			List<float3> points = new();
+			List<float3> velocities = new();
 
+			// شكل دلو داخل حدود local تقريباً:
+			// الأسفل أضيق، الأعلى أوسع
+			float bottomRadius = size * 0.24f;
+			float topRadius = size * 0.38f;
+			float height = size;
+
+			for (int x = 0; x < numPerAxis; x++)
+			{
+				for (int y = 0; y < numPerAxis; y++)
+				{
+					for (int z = 0; z < numPerAxis; z++)
+					{
+						float tx = x / (numPerAxis - 1f);
+						float ty = y / (numPerAxis - 1f);
+						float tz = z / (numPerAxis - 1f);
+
+						float px = (tx - 0.5f) * size;
+						float py = (ty - 0.5f) * height;
+						float pz = (tz - 0.5f) * size;
+
+						float currentRadius = Mathf.Lerp(bottomRadius, topRadius, ty);
+						float r = Mathf.Sqrt(px * px + pz * pz);
+
+						// فقط النقاط التي تقع داخل الدلو
+						if (r <= currentRadius)
+						{
+							float3 jitter = UnityEngine.Random.insideUnitSphere * jitterStrength;
+							points.Add(new float3(px + centre.x, py + centre.y, pz + centre.z) + jitter);
+							velocities.Add(initialVel);
+						}
+					}
+				}
+			}
+
+			return (points.ToArray(), velocities.ToArray());
+		}
 
 		void OnValidate()
 		{

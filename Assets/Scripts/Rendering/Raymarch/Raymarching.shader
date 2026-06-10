@@ -595,13 +595,13 @@ HitInfo RayBucketWithMatrix(float3 rayPos, float3 rayDir, float4x4 localToWorld,
             float3 SampleEnvironment(float3 pos, float3 dir)
             {
                 HitInfo floorInfo = RayBox(pos, dir, floorPos, floorSize);
-                HitInfo bucketInfo = RayBucketWithMatrix(pos, dir, cubeLocalToWorld, cubeWorldToLocal);
+                // HitInfo bucketInfo = RayBucketWithMatrix(pos, dir, cubeLocalToWorld, cubeWorldToLocal);
 
-                if (bucketInfo.didHit && bucketInfo.dst < floorInfo.dst)
-                {
-                    return saturate(dot(bucketInfo.normal, dirToSun) * 0.5 + 0.5) * cubeCol;
-                }
-                else if (floorInfo.didHit)
+                // if (bucketInfo.didHit && bucketInfo.dst < floorInfo.dst)
+                // {
+                //     return saturate(dot(bucketInfo.normal, dirToSun) * 0.5 + 0.5) * cubeCol;
+                // }
+                if (floorInfo.didHit)
                 {
                     // Choose tileCol based on quadrant
                     float3 tileCol = floorInfo.hitPoint.x < 0 ? tileCol1 : tileCol2;
@@ -618,7 +618,7 @@ HitInfo RayBucketWithMatrix(float3 rayPos, float3 rayDir, float4x4 localToWorld,
                     tileCol = TweakHSV(tileCol, randomVariation);
 
                     float3 shadowMap = Transmittance(CalculateDensityAlongRay(floorInfo.hitPoint, _WorldSpaceLightPos0, lightStepSize * 2) * 2);
-                    bool inShadow = RayBucketWithMatrix(floorInfo.hitPoint, dirToSun, cubeLocalToWorld, cubeWorldToLocal).didHit;
+                    bool inShadow = false;
                     if (inShadow) shadowMap *= 0.2;
                     return tileCol * shadowMap;
                 }
