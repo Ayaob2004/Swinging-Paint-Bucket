@@ -8,9 +8,41 @@ using static Seb.Helpers.ComputeHelper;
 
 namespace Seb.Fluid.Simulation
 {
+	public enum DensityBakeMode
+	{
+		FastParticleSplat,
+		AccurateSPHPerVoxel
+	}
+
+	public enum SimulationPerformanceProfile
+	{
+		Custom,
+		Laptop,
+		Balanced,
+		HighQuality
+	}
+
+	public enum FluidMaterialPreset
+	{
+		Custom,
+		Water,
+		Paint,
+		ThickPaint
+	}
+
 	public class FluidSim : MonoBehaviour
 	{
 		public event Action<FluidSim> SimulationInitCompleted;
+
+		[Header("Performance")]
+		public SimulationPerformanceProfile performanceProfile = SimulationPerformanceProfile.Laptop;
+		public FluidMaterialPreset materialPreset = FluidMaterialPreset.Paint;
+		public DensityBakeMode densityBakeMode = DensityBakeMode.FastParticleSplat;
+		[Min(1)] public int densityTextureUpdateInterval = 1;
+		[Tooltip("Small fixed prediction horizon improves SPH stability at large timesteps.")]
+		public float predictionTimestep = 1f / 120f;
+		[Tooltip("Scale applied when splatting particle density into the 3D texture.")]
+		public float splatDensityScale = 1f;
 
 		[Header("Time Step")] public float normalTimeScale = 1;
 		public float slowTimeScale = 0.1f;
@@ -73,6 +105,8 @@ namespace Seb.Fluid.Simulation
 		const int renderKernel = 8;
 		const int foamUpdateKernel = 9;
 		const int foamReorderCopyBackKernel = 10;
+		const int clearDensityKernel = 11;
+		const int splatDensityKernel = 12;
 
 		SpatialHash spatialHash;
 
@@ -84,6 +118,8 @@ namespace Seb.Fluid.Simulation
 		bool inSlowMode;
 		Spawner3D.SpawnData spawnData;
 		Dictionary<ComputeBuffer, string> bufferNameLookup;
+		int densityMapFrameCounter;
+		Vector3Int cachedDensityMapSize;
 
 		void Start()
 		{
@@ -95,6 +131,9 @@ namespace Seb.Fluid.Simulation
 
 		void Initialize()
 		{
+			ApplyPerformanceProfile();
+			ApplyMaterialPreset();
+
 			spawnData = spawner.GetSpawnData();
 			int numParticles = spawnData.points.Length;
 
@@ -224,6 +263,13 @@ namespace Seb.Fluid.Simulation
 				spatialHash.SpatialOffsets,
 			});
 
+			SetBuffers(compute, clearDensityKernel, bufferNameLookup, new ComputeBuffer[] { });
+
+			SetBuffers(compute, splatDensityKernel, bufferNameLookup, new ComputeBuffer[]
+			{
+				positionBuffer,
+			});
+
 			// Foam update kernel
 			SetBuffers(compute, foamUpdateKernel, bufferNameLookup, new ComputeBuffer[]
 			{
@@ -256,7 +302,7 @@ namespace Seb.Fluid.Simulation
 			// (so that display can work even if paused at start)
 			if (renderToTex3D)
 			{
-				RunSimulationFrame(0);
+				RunSimulationFrame(0, forceDensityUpdate: true);
 			}
 
 			SimulationInitCompleted?.Invoke(this);
@@ -281,7 +327,7 @@ namespace Seb.Fluid.Simulation
 			HandleInput();
 		}
 
-		void RunSimulationFrame(float frameDeltaTime)
+		void RunSimulationFrame(float frameDeltaTime, bool forceDensityUpdate = false)
 		{
 			float subStepDeltaTime = frameDeltaTime / iterationsPerFrame;
 			UpdateSettings(subStepDeltaTime, frameDeltaTime);
@@ -301,23 +347,53 @@ namespace Seb.Fluid.Simulation
 			}
 
 			// 3D density map
-			if (renderToTex3D)
+			if (renderToTex3D && (forceDensityUpdate || ShouldUpdateDensityMap()))
 			{
 				UpdateDensityMap();
 			}
 		}
 
+		bool ShouldUpdateDensityMap()
+		{
+			densityMapFrameCounter++;
+			if (densityMapFrameCounter >= densityTextureUpdateInterval)
+			{
+				densityMapFrameCounter = 0;
+				return true;
+			}
+
+			return false;
+		}
+
 		void UpdateDensityMap()
 		{
-			float maxAxis = Mathf.Max(transform.localScale.x, transform.localScale.y, transform.localScale.z);
-			int w = Mathf.RoundToInt(transform.localScale.x / maxAxis * densityTextureRes);
-			int h = Mathf.RoundToInt(transform.localScale.y / maxAxis * densityTextureRes);
-			int d = Mathf.RoundToInt(transform.localScale.z / maxAxis * densityTextureRes);
-			CreateRenderTexture3D(ref DensityMap, w, h, d, UnityEngine.Experimental.Rendering.GraphicsFormat.R16_SFloat, TextureWrapMode.Clamp);
-			//Debug.Log(w + " " + h + "  " + d);
+			EnsureDensityMapAllocated();
+
+			compute.SetTexture(clearDensityKernel, "DensityMap", DensityMap);
 			compute.SetTexture(renderKernel, "DensityMap", DensityMap);
-			compute.SetInts("densityMapSize", DensityMap.width, DensityMap.height, DensityMap.volumeDepth);
-			Dispatch(compute, DensityMap.width, DensityMap.height, DensityMap.volumeDepth, renderKernel);
+			compute.SetTexture(splatDensityKernel, "DensityMap", DensityMap);
+			compute.SetInts("densityMapSize", cachedDensityMapSize.x, cachedDensityMapSize.y, cachedDensityMapSize.z);
+			compute.SetFloat("splatDensityScale", splatDensityScale);
+
+			if (densityBakeMode == DensityBakeMode.FastParticleSplat)
+			{
+				Dispatch(compute, cachedDensityMapSize.x, cachedDensityMapSize.y, cachedDensityMapSize.z, clearDensityKernel);
+				Dispatch(compute, positionBuffer.count, kernelIndex: splatDensityKernel);
+			}
+			else
+			{
+				Dispatch(compute, cachedDensityMapSize.x, cachedDensityMapSize.y, cachedDensityMapSize.z, renderKernel);
+			}
+		}
+
+		void EnsureDensityMapAllocated()
+		{
+			float maxAxis = Mathf.Max(transform.localScale.x, transform.localScale.y, transform.localScale.z);
+			int w = Mathf.Max(8, Mathf.RoundToInt(transform.localScale.x / maxAxis * densityTextureRes));
+			int h = Mathf.Max(8, Mathf.RoundToInt(transform.localScale.y / maxAxis * densityTextureRes));
+			int d = Mathf.Max(8, Mathf.RoundToInt(transform.localScale.z / maxAxis * densityTextureRes));
+			cachedDensityMapSize = new Vector3Int(w, h, d);
+			CreateRenderTexture3D(ref DensityMap, w, h, d, UnityEngine.Experimental.Rendering.GraphicsFormat.R16_SFloat, TextureWrapMode.Clamp);
 		}
 
 		void RunSimulationStep()
@@ -371,6 +447,8 @@ namespace Seb.Fluid.Simulation
 			compute.SetFloat("pressureMultiplier", pressureMultiplier);
 			compute.SetFloat("nearPressureMultiplier", nearPressureMultiplier);
 			compute.SetFloat("viscosityStrength", viscosityStrength);
+			compute.SetFloat("predictionTimestep", predictionTimestep);
+			compute.SetInt("foamEnabled", foamActive ? 1 : 0);
 			compute.SetVector("boundsSize", simBoundsSize);
 			compute.SetVector("centre", simBoundsCentre);
 
@@ -422,7 +500,7 @@ namespace Seb.Fluid.Simulation
 				// (so that display can work even if paused at start)
 				if (renderToTex3D)
 				{
-					RunSimulationFrame(0);
+					RunSimulationFrame(0, forceDensityUpdate: true);
 				}
 			}
 
@@ -433,6 +511,83 @@ namespace Seb.Fluid.Simulation
 		}
 
 		private float ActiveTimeScale => inSlowMode ? slowTimeScale : normalTimeScale;
+
+		public void ApplyPerformanceProfile()
+		{
+			switch (performanceProfile)
+			{
+				case SimulationPerformanceProfile.Laptop:
+					densityBakeMode = DensityBakeMode.FastParticleSplat;
+					densityTextureRes = 96;
+					densityTextureUpdateInterval = 1;
+					iterationsPerFrame = 2;
+					maxTimestepFPS = 60;
+					splatDensityScale = 1.15f;
+					break;
+				case SimulationPerformanceProfile.Balanced:
+					densityBakeMode = DensityBakeMode.FastParticleSplat;
+					densityTextureRes = 128;
+					densityTextureUpdateInterval = 1;
+					iterationsPerFrame = 3;
+					maxTimestepFPS = 60;
+					splatDensityScale = 1f;
+					break;
+				case SimulationPerformanceProfile.HighQuality:
+					densityBakeMode = DensityBakeMode.AccurateSPHPerVoxel;
+					densityTextureRes = 150;
+					densityTextureUpdateInterval = 1;
+					iterationsPerFrame = 3;
+					maxTimestepFPS = 0;
+					splatDensityScale = 1f;
+					break;
+			}
+		}
+
+		public void ApplyMaterialPreset()
+		{
+			switch (materialPreset)
+			{
+				case FluidMaterialPreset.Water:
+					gravity = -10f;
+					smoothingRadius = 0.2f;
+					targetDensity = 630f;
+					pressureMultiplier = 288f;
+					nearPressureMultiplier = 2.15f;
+					viscosityStrength = 0.001f;
+					collisionDamping = 0.95f;
+					break;
+				case FluidMaterialPreset.Paint:
+					gravity = -9.81f;
+					smoothingRadius = 0.18f;
+					targetDensity = 700f;
+					pressureMultiplier = 340f;
+					nearPressureMultiplier = 2.6f;
+					viscosityStrength = 0.018f;
+					collisionDamping = 0.88f;
+					splatDensityScale = 1.2f;
+					break;
+				case FluidMaterialPreset.ThickPaint:
+					gravity = -9.81f;
+					smoothingRadius = 0.16f;
+					targetDensity = 780f;
+					pressureMultiplier = 420f;
+					nearPressureMultiplier = 3f;
+					viscosityStrength = 0.045f;
+					collisionDamping = 0.82f;
+					splatDensityScale = 1.35f;
+					break;
+			}
+		}
+
+		public int ParticleCount => positionBuffer != null ? positionBuffer.count : 0;
+
+		void OnValidate()
+		{
+			if (performanceProfile != SimulationPerformanceProfile.Custom)
+				ApplyPerformanceProfile();
+			if (materialPreset != FluidMaterialPreset.Custom)
+				ApplyMaterialPreset();
+		}
 
 		void OnDestroy()
 		{

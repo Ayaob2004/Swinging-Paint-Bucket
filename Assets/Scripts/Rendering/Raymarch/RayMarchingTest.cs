@@ -6,6 +6,18 @@ namespace Seb.Fluid.Rendering
 	[ImageEffectAllowedInSceneView]
 	public class RayMarchingTest : MonoBehaviour
 	{
+		public enum RenderQualityProfile
+		{
+			Custom,
+			Laptop,
+			Balanced,
+			HighQuality
+		}
+
+		[Header("Quality")]
+		public RenderQualityProfile renderQualityProfile = RenderQualityProfile.Laptop;
+		public bool syncWithSimPerformanceProfile = true;
+
 		[Header("Settings")]
 		public float densityOffset = 150;
 		public int numRefractions = 4;
@@ -28,6 +40,65 @@ namespace Seb.Fluid.Rendering
 		{
 			raymarchMat = new Material(shader);
 			Camera.main.depthTextureMode = DepthTextureMode.Depth;
+			ApplyRenderQualityProfile();
+			if (sim != null)
+				sim.SimulationInitCompleted += _ => ApplyRenderQualityProfile();
+		}
+
+		public void ApplyRenderQualityProfile()
+		{
+			if (syncWithSimPerformanceProfile && sim != null && sim.performanceProfile != SimulationPerformanceProfile.Custom)
+			{
+				switch (sim.performanceProfile)
+				{
+					case SimulationPerformanceProfile.Laptop:
+						renderQualityProfile = RenderQualityProfile.Laptop;
+						break;
+					case SimulationPerformanceProfile.Balanced:
+						renderQualityProfile = RenderQualityProfile.Balanced;
+						break;
+					case SimulationPerformanceProfile.HighQuality:
+						renderQualityProfile = RenderQualityProfile.HighQuality;
+						break;
+				}
+			}
+
+			switch (renderQualityProfile)
+			{
+				case RenderQualityProfile.Laptop:
+					numRefractions = 2;
+					stepSize = 0.03f;
+					lightStepSize = 0.15f;
+					densityOffset = 180f;
+					densityMultiplier = 0.055f;
+					extinctionCoefficients = new Vector3(14f, 5f, 4f);
+					indexOfRefraction = 1.42f;
+					break;
+				case RenderQualityProfile.Balanced:
+					numRefractions = 3;
+					stepSize = 0.025f;
+					lightStepSize = 0.2f;
+					densityOffset = 170f;
+					densityMultiplier = 0.05f;
+					extinctionCoefficients = new Vector3(12f, 4f, 4f);
+					indexOfRefraction = 1.38f;
+					break;
+				case RenderQualityProfile.HighQuality:
+					numRefractions = 4;
+					stepSize = 0.02f;
+					lightStepSize = 0.1f;
+					densityOffset = 150f;
+					densityMultiplier = 0.05f;
+					extinctionCoefficients = new Vector3(10f, 3.5f, 3.5f);
+					indexOfRefraction = 1.33f;
+					break;
+			}
+		}
+
+		void OnValidate()
+		{
+			if (renderQualityProfile != RenderQualityProfile.Custom)
+				ApplyRenderQualityProfile();
 		}
 
 		[ImageEffectOpaque]

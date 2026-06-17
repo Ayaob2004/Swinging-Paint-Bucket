@@ -14,7 +14,9 @@ namespace Seb.Fluid.Simulation
 		public bool showSpawnBounds;
 		public SpawnRegion[] spawnRegions;
 
-		[Header("Debug Info")] public int debug_num_particles;
+		[Header("Debug Info")]
+		public int debug_num_particles;
+		public int debug_bucket_particles;
 		public float debug_spawn_volume;
 
 
@@ -113,6 +115,7 @@ namespace Seb.Fluid.Simulation
 		{
 			debug_spawn_volume = 0;
 			debug_num_particles = 0;
+			debug_bucket_particles = 0;
 
 			if (spawnRegions != null)
 			{
@@ -121,8 +124,41 @@ namespace Seb.Fluid.Simulation
 					debug_spawn_volume += region.Volume;
 					int numPerAxis = region.CalculateParticleCountPerAxis(particleSpawnDensity);
 					debug_num_particles += numPerAxis * numPerAxis * numPerAxis;
+					debug_bucket_particles += EstimateBucketParticleCount(numPerAxis, region.size);
 				}
 			}
+		}
+
+		static int EstimateBucketParticleCount(int numPerAxis, float size)
+		{
+			float bottomRadius = size * 0.24f;
+			float topRadius = size * 0.38f;
+			int count = 0;
+
+			for (int x = 0; x < numPerAxis; x++)
+			{
+				for (int y = 0; y < numPerAxis; y++)
+				{
+					for (int z = 0; z < numPerAxis; z++)
+					{
+						float tx = x / (numPerAxis - 1f);
+						float ty = y / (numPerAxis - 1f);
+						float tz = z / (numPerAxis - 1f);
+
+						float px = (tx - 0.5f) * size;
+						float py = (ty - 0.5f) * size;
+						float pz = (tz - 0.5f) * size;
+
+						float currentRadius = Mathf.Lerp(bottomRadius, topRadius, ty);
+						float r = Mathf.Sqrt(px * px + pz * pz);
+
+						if (r <= currentRadius)
+							count++;
+					}
+				}
+			}
+
+			return count;
 		}
 
 		void OnDrawGizmos()
