@@ -45,6 +45,8 @@ Shader "Fluid/Raymarching"
             const float indexOfRefraction;
             const int numRefractions;
             const float3 extinctionCoeff;
+            const float4 fluidColor;
+            const float paintOpacity;
 
             const float3 testParams;
             const float3 boundsSize;
@@ -655,62 +657,51 @@ HitInfo RayBucketWithMatrix(float3 rayPos, float3 rayDir, float4x4 localToWorld,
             float3 RayMarchFluid(float2 uv, float stepSize)
             {
                 uint rngState = (uint)(uv.x * 1243 + uv.y * 96456);
+
                 float3 localViewVector = mul(unity_CameraInvProjection, float4(uv * 2 - 1, 0, -1));
                 float3 rayDir = normalize(mul(unity_CameraToWorld, float4(localViewVector, 0)));
                 float3 rayPos = _WorldSpaceCameraPos.xyz;
+
                 bool travellingThroughFluid = IsInsideFluid(rayPos);
 
-                float3 transmittance = 1;
-                float3 light = 0;
+                SurfaceInfo surfaceInfo = FindNextSurface(
+                    rayPos,
+                    rayDir,
+                    !travellingThroughFluid,
+                    rngState,
+                    1,
+                    999999
+                );
 
-                for (int i = 0; i < numRefractions; i++)
+                // ما في سائل أمام الكاميرا: ارسم البيئة عادي
+                if (!surfaceInfo.foundSurface)
                 {
-                    float densityStepSize = lightStepSize * (i + 1); // increase step size with each iteration
-                    bool searchForNextFluidEntryPoint = !travellingThroughFluid;
-
-                    float disabledCubeDst = 1.#INF;
-                    SurfaceInfo surfaceInfo = FindNextSurface(rayPos, rayDir, searchForNextFluidEntryPoint, rngState, i == 0 ? 1 : 0, disabledCubeDst);
-                    bool useCubeHit = false;
-                    if (!surfaceInfo.foundSurface) break;
-
-                    transmittance *= Transmittance(surfaceInfo.densityAlongRay);
-
-                    // If light hits the floor it will be scattered in all directions (in hemisphere)
-                    // Not sure how to handle this in real-time, so just break out of loop here
-                    if (surfaceInfo.pos.y < -boundsSize.y / 2 + 0.05)
-                    {
-                        break;
-                    }
-
-                    float3 normal = CalculateNormal(surfaceInfo.pos);
-                    if (dot(normal, rayDir) > 0) normal = -normal;
-
-                    // Indicies of refraction
-                    float iorA = travellingThroughFluid ? indexOfRefraction : iorAir;
-                    float iorB =travellingThroughFluid ? iorAir : indexOfRefraction;
-
-                    // Calculate reflection and refraction, and choose which path to follow
-                    LightResponse lightResponse = CalculateReflectionAndRefraction(rayDir, normal, iorA, iorB);
-                    float densityAlongRefractRay = CalculateDensityAlongRay(surfaceInfo.pos, lightResponse.refractDir, densityStepSize);
-                    float densityAlongReflectRay = CalculateDensityAlongRay(surfaceInfo.pos, lightResponse.reflectDir, densityStepSize);
-                    bool traceRefractedRay = densityAlongRefractRay * lightResponse.refractWeight > densityAlongReflectRay * lightResponse.reflectWeight;
-                    travellingThroughFluid = traceRefractedRay != travellingThroughFluid;
-
-                    // Approximate less interesting path
-                    if (traceRefractedRay) light += Light(surfaceInfo.pos, lightResponse.reflectDir) * transmittance * Transmittance(densityAlongReflectRay) * lightResponse.reflectWeight;
-                    else light += Light(surfaceInfo.pos, lightResponse.refractDir) * transmittance * Transmittance(densityAlongRefractRay) * lightResponse.refractWeight;
-
-                    // Set up ray for more interesting path
-                    rayPos = surfaceInfo.pos;
-                    rayDir = traceRefractedRay ? lightResponse.refractDir : lightResponse.reflectDir;
-                    transmittance *= (traceRefractedRay ? lightResponse.refractWeight : lightResponse.reflectWeight);
+                    return Light(rayPos, rayDir);
                 }
 
-                // Approximate remaining path
-                float densityRemainder = CalculateDensityAlongRay(rayPos, rayDir, lightStepSize);
-                light += Light(rayPos, rayDir) * transmittance * Transmittance(densityRemainder);
+                float3 normal = CalculateNormal(surfaceInfo.pos);
+                if (dot(normal, rayDir) > 0)
+                {
+                    normal = -normal;
+                }
 
-                return light;
+                float3 lightDir = normalize(dirToSun);
+                float3 viewDir = normalize(_WorldSpaceCameraPos.xyz - surfaceInfo.pos);
+
+                float diffuse = saturate(dot(normal, lightDir));
+                float3 halfDir = normalize(lightDir + viewDir);
+                float specular = pow(saturate(dot(normal, halfDir)), 48) * 0.18;
+
+                float3 shadow = Transmittance(
+                    CalculateDensityAlongRay(surfaceInfo.pos + normal * TinyNudge * 4, lightDir, lightStepSize * 2) * 1.5
+                );
+
+                float3 paintLit = fluidColor.rgb * (0.45 + 0.75 * diffuse) + specular.xxx;
+
+                float3 environment = Light(rayPos, rayDir);
+
+                // paintOpacity = 1 يعني بدون شفافية
+                return lerp(environment, paintLit, saturate(paintOpacity));
             }
 
 

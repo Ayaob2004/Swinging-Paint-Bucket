@@ -22,6 +22,10 @@ namespace Seb.Fluid.Rendering
 		public float densityOffset = 150;
 		public int numRefractions = 4;
 		public Vector3 extinctionCoefficients;
+
+		[Header("Paint Look")]
+		public Color fluidColor = new Color(1f, 0.12f, 0.02f, 1f); // orange/red paint
+		[Range(0, 1)] public float paintOpacity = 1f;
 		public float densityMultiplier = 0.001f;
 		[Min(0.01f)] public float stepSize = 0.02f;
 		public float lightStepSize = 0.4f;
@@ -128,7 +132,8 @@ namespace Seb.Fluid.Rendering
 			raymarchMat.SetFloat("lightStepSize", lightStepSize);
 			raymarchMat.SetInt("numRefractions", numRefractions);
 			raymarchMat.SetVector("extinctionCoeff", extinctionCoefficients);
-
+			raymarchMat.SetColor("fluidColor", fluidColor);
+			raymarchMat.SetFloat("paintOpacity", paintOpacity);
 			raymarchMat.SetMatrix("cubeLocalToWorld", Matrix4x4.TRS(cubeTransform.position, cubeTransform.rotation, cubeTransform.localScale / 2));
 			raymarchMat.SetMatrix("cubeWorldToLocal", Matrix4x4.TRS(cubeTransform.position, cubeTransform.rotation, cubeTransform.localScale / 2).inverse);
 			
