@@ -262,17 +262,23 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: c8b3b79f98be3f34e8fefade4cef2ade, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  performanceProfile: 1
+  materialPreset: 2
+  densityBakeMode: 0
+  densityTextureUpdateInterval: 1
+  predictionTimestep: 0.008333334
+  splatDensityScale: 1.2
   normalTimeScale: 1
   slowTimeScale: 0.025
   maxTimestepFPS: 60
-  iterationsPerFrame: 3
-  gravity: -10
-  smoothingRadius: 0.2
-  targetDensity: 630
-  pressureMultiplier: 288
-  nearPressureMultiplier: 2.25
-  viscosityStrength: 0.001
-  collisionDamping: 0.95
+  iterationsPerFrame: 2
+  gravity: -9.81
+  smoothingRadius: 0.18
+  targetDensity: 700
+  pressureMultiplier: 340
+  nearPressureMultiplier: 2.6
+  viscosityStrength: 0.018
+  collisionDamping: 0.88
   foamActive: 0
   maxFoamParticleCount: 1000
   trappedAirSpawnRate: 0
@@ -286,7 +292,7 @@ MonoBehaviour:
   bubbleScale: 0.8
   bubbleChangeScaleSpeed: 1
   renderToTex3D: 1
-  densityTextureRes: 150
+  densityTextureRes: 96
   compute: {fileID: 7200000, guid: 9443696acfd0ebe4fb503b56d952256c, type: 3}
   spawner: {fileID: 271053323}
   DensityMap: {fileID: 0}
@@ -322,6 +328,7 @@ MonoBehaviour:
     size: 8
     debugDisplayCol: {r: 1, g: 0.42878985, b: 0.15566039, a: 1}
   debug_num_particles: 300763
+  debug_bucket_particles: 89627
   debug_spawn_volume: 512
 --- !u!1 &811702636
 GameObject:
@@ -372,19 +379,23 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: e983326694007bf449a3b0373d9ae1d8, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  densityOffset: 200
-  numRefractions: 4
-  extinctionCoefficients: {x: 12, y: 4, z: 4}
-  densityMultiplier: 0.05
-  stepSize: 0.02
-  lightStepSize: 0.1
-  indexOfRefraction: 1.33
+  renderQualityProfile: 1
+  syncWithSimPerformanceProfile: 1
+  densityOffset: 180
+  numRefractions: 2
+  extinctionCoefficients: {x: 14, y: 5, z: 4}
+  fluidColor: {r: 0.8113208, g: 0.29238164, b: 0.6042619, a: 1}
+  paintOpacity: 1
+  densityMultiplier: 0.055
+  stepSize: 0.03
+  lightStepSize: 0.15
+  indexOfRefraction: 1.42
   testParams: {x: 30, y: 5, z: 1.02}
   environmentSettings:
     tileCol1: {r: 0.20392157, g: 0.5176471, b: 0.7764706, a: 1}
-    tileCol2: {r: 0.6081319, g: 0.36850303, b: 0.8584906, a: 1}
-    tileCol3: {r: 0.3019758, g: 0.735849, b: 0.45801795, a: 1}
-    tileCol4: {r: 0.8018868, g: 0.6434483, b: 0.36690104, a: 1}
+    tileCol2: {r: 0.20392159, g: 0.5176471, b: 0.77647066, a: 1}
+    tileCol3: {r: 0.20392159, g: 0.5176471, b: 0.77647066, a: 1}
+    tileCol4: {r: 0.20392159, g: 0.5176471, b: 0.77647066, a: 1}
     tileColVariation: {x: 0.33, y: 0, z: 0.47}
     tileScale: 1
     tileDarkOffset: -0.35
