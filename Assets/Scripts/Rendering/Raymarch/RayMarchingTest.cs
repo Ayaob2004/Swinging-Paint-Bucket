@@ -24,7 +24,6 @@ namespace Seb.Fluid.Rendering
 		public Vector3 extinctionCoefficients;
 
 		[Header("Paint Look")]
-		public Color fluidColor = new Color(1f, 0.12f, 0.02f, 1f); // orange/red paint
 		[Range(0, 1)] public float paintOpacity = 1f;
 		public float densityMultiplier = 0.001f;
 		[Min(0.01f)] public float stepSize = 0.02f;
@@ -108,7 +107,7 @@ namespace Seb.Fluid.Rendering
 		[ImageEffectOpaque]
 		void OnRenderImage(RenderTexture src, RenderTexture target)
 		{
-			if (sim.DensityMap != null)
+			if (sim.DensityMap != null && sim.ColorMap != null)
 			{
 				SetShaderParams();
 				Graphics.Blit(src, target, raymarchMat);
@@ -123,6 +122,7 @@ namespace Seb.Fluid.Rendering
 		{
 			SetEnvironmentParams(raymarchMat, environmentSettings);
 			raymarchMat.SetTexture("DensityMap", sim.DensityMap);
+			raymarchMat.SetTexture("ColorMap", sim.ColorMap);
 			raymarchMat.SetVector("boundsSize", sim.Scale);
 			raymarchMat.SetFloat("volumeValueOffset", densityOffset);
 			raymarchMat.SetVector("testParams", testParams);
@@ -132,7 +132,6 @@ namespace Seb.Fluid.Rendering
 			raymarchMat.SetFloat("lightStepSize", lightStepSize);
 			raymarchMat.SetInt("numRefractions", numRefractions);
 			raymarchMat.SetVector("extinctionCoeff", extinctionCoefficients);
-			raymarchMat.SetColor("fluidColor", fluidColor);
 			raymarchMat.SetFloat("paintOpacity", paintOpacity);
 			raymarchMat.SetMatrix("cubeLocalToWorld", Matrix4x4.TRS(cubeTransform.position, cubeTransform.rotation, cubeTransform.localScale / 2));
 			raymarchMat.SetMatrix("cubeWorldToLocal", Matrix4x4.TRS(cubeTransform.position, cubeTransform.rotation, cubeTransform.localScale / 2).inverse);

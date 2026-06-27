@@ -40,12 +40,12 @@ Shader "Fluid/Raymarching"
             }
 
             Texture3D<float4> DensityMap;
+            Texture3D<float4> ColorMap; // RGB = density-weighted particle color sum, written by the simulation compute shader
             SamplerState linearClampSampler;
 
             const float indexOfRefraction;
             const int numRefractions;
             const float3 extinctionCoeff;
-            const float4 fluidColor;
             const float paintOpacity;
 
             const float3 testParams;
@@ -266,6 +266,19 @@ Shader "Fluid/Raymarching"
                 if (isEdge) return -volumeValueOffset;
 
                 return DensityMap.SampleLevel(linearClampSampler, uvw, 0).r - volumeValueOffset;
+            }
+
+            // Recovers the locally-averaged paint color at a point inside the fluid.
+            // ColorMap stores a density-weighted color SUM (not yet normalized), accumulated using the exact
+            // same per-particle kernel weights as DensityMap's raw (un-offset) value, so dividing one by the
+            // other recovers a proper weighted average -- this is what keeps colors from different regions
+            // distinct rather than literally mixing, except for a soft blend exactly where two colors overlap.
+            float3 SampleColor(float3 pos)
+            {
+                float3 uvw = (pos + boundsSize * 0.5) / boundsSize;
+                float rawDensity = max(DensityMap.SampleLevel(linearClampSampler, uvw, 0).r, 1e-4);
+                float3 weightedColor = ColorMap.SampleLevel(linearClampSampler, uvw, 0).rgb;
+                return weightedColor / rawDensity;
             }
 
 
@@ -696,7 +709,11 @@ HitInfo RayBucketWithMatrix(float3 rayPos, float3 rayDir, float4x4 localToWorld,
                     CalculateDensityAlongRay(surfaceInfo.pos + normal * TinyNudge * 4, lightDir, lightStepSize * 2) * 1.5
                 );
 
-                float3 paintLit = fluidColor.rgb * (0.45 + 0.75 * diffuse) + specular.xxx;
+                // Per-particle paint color (from the multi-region spawn setup) replaces the old single
+                // global fluidColor tint -- fluidColor is kept as a uniform for backward compatibility
+                // but no longer drives the surface tint directly.
+                float3 surfaceColor = SampleColor(surfaceInfo.pos);
+                float3 paintLit = surfaceColor * (0.45 + 0.75 * diffuse) + specular.xxx;
 
                 float3 environment = Light(rayPos, rayDir);
 

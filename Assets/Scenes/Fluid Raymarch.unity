@@ -279,23 +279,12 @@ MonoBehaviour:
   nearPressureMultiplier: 2.6
   viscosityStrength: 0.018
   collisionDamping: 0.88
-  foamActive: 0
-  maxFoamParticleCount: 1000
-  trappedAirSpawnRate: 0
-  spawnRateFadeInTime: 1
-  spawnRateFadeStartTime: 0
-  trappedAirVelocityMinMax: {x: 0, y: 0}
-  foamKineticEnergyMinMax: {x: 0, y: 0}
-  bubbleBuoyancy: 0
-  sprayClassifyMaxNeighbours: 6
-  bubbleClassifyMinNeighbours: 20
-  bubbleScale: 0.8
-  bubbleChangeScaleSpeed: 1
   renderToTex3D: 1
   densityTextureRes: 96
   compute: {fileID: 7200000, guid: 9443696acfd0ebe4fb503b56d952256c, type: 3}
   spawner: {fileID: 271053323}
   DensityMap: {fileID: 0}
+  ColorMap: {fileID: 0}
 --- !u!33 &271053322
 MeshFilter:
   m_ObjectHideFlags: 0
@@ -325,11 +314,20 @@ MonoBehaviour:
   showSpawnBounds: 1
   spawnRegions:
   - centre: {x: 0, y: 0, z: 0}
-    size: 8
-    debugDisplayCol: {r: 1, g: 0.42878985, b: 0.15566039, a: 1}
-  debug_num_particles: 300763
-  debug_bucket_particles: 89627
-  debug_spawn_volume: 512
+    size: 4
+    paintColor: {r: 1, g: 0.42878985, b: 0.15566039, a: 1}
+  - centre: {x: 4, y: 0, z: 0}
+    size: 4
+    paintColor: {r: 1, g: 0.15686274, b: 0.8376594, a: 1}
+  - centre: {x: 0, y: 4, z: 0}
+    size: 6
+    paintColor: {r: 0.15686274, g: 1, b: 0.40595803, a: 1}
+  - centre: {x: 0, y: 0, z: 5}
+    size: 5
+    paintColor: {r: 0.9071502, g: 1, b: 0.15686274, a: 1}
+  debug_num_particles: 270962
+  debug_bucket_particles: 79302
+  debug_spawn_volume: 469
 --- !u!1 &811702636
 GameObject:
   m_ObjectHideFlags: 0
@@ -384,7 +382,6 @@ MonoBehaviour:
   densityOffset: 180
   numRefractions: 2
   extinctionCoefficients: {x: 14, y: 5, z: 4}
-  fluidColor: {r: 0.8113208, g: 0.29238164, b: 0.6042619, a: 1}
   paintOpacity: 1
   densityMultiplier: 0.055
   stepSize: 0.03
