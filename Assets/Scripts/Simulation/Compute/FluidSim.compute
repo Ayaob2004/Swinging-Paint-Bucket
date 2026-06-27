@@ -32,12 +32,45 @@ StructuredBuffer<uint> SortedIndices;
 
 RWStructuredBuffer<float3> Debug;
 
+struct CollisionTriangle
+{
+    float3 a;
+    float3 b;
+    float3 c;
+    float3 normal;
+    int objectIndex;
+};
+
+struct CollisionObject
+{
+    float4x4 localToWorld;
+    float4x4 worldToLocal;
+    float4x4 previousLocalToWorld;
+    float4x4 previousWorldToLocal;
+
+    int triangleStartIndex;
+    int triangleCount;
+
+    float collisionThickness;
+    float collisionDamping;
+    float friction;
+
+    int isDynamic;
+};
+
+StructuredBuffer<CollisionTriangle> CollisionTriangles;
+StructuredBuffer<CollisionObject> CollisionObjects;
+
+int collisionTriangleCount;
+int collisionObjectCount;
+
 // Settings
 const uint numParticles;
 const float gravity;
 const float deltaTime;
 const float simTime;
 const float collisionDamping;
+int useMeshCollisions;
 const float smoothingRadius;
 const float targetDensity;
 const float pressureMultiplier;
@@ -113,6 +146,144 @@ float BucketRadiusAtY(float y)
     float topRadius = 0.38;
 
     return lerp(bottomRadius, topRadius, t);
+}
+
+float3 ClosestPointOnTriangle(float3 p, float3 a, float3 b, float3 c)
+{
+    float3 ab = b - a;
+    float3 ac = c - a;
+    float3 ap = p - a;
+
+    float d1 = dot(ab, ap);
+    float d2 = dot(ac, ap);
+
+    if (d1 <= 0 && d2 <= 0)
+        return a;
+
+    float3 bp = p - b;
+    float d3 = dot(ab, bp);
+    float d4 = dot(ac, bp);
+
+    if (d3 >= 0 && d4 <= d3)
+        return b;
+
+    float vc = d1 * d4 - d3 * d2;
+
+    if (vc <= 0 && d1 >= 0 && d3 <= 0)
+    {
+        float v = d1 / (d1 - d3);
+        return a + v * ab;
+    }
+
+    float3 cp = p - c;
+    float d5 = dot(ab, cp);
+    float d6 = dot(ac, cp);
+
+    if (d6 >= 0 && d5 <= d6)
+        return c;
+
+    float vb = d5 * d2 - d1 * d6;
+
+    if (vb <= 0 && d2 >= 0 && d6 <= 0)
+    {
+        float w = d2 / (d2 - d6);
+        return a + w * ac;
+    }
+
+    float va = d3 * d6 - d5 * d4;
+
+    if (va <= 0 && (d4 - d3) >= 0 && (d5 - d6) >= 0)
+    {
+        float w = (d4 - d3) / ((d4 - d3) + (d5 - d6));
+        return b + w * (c - b);
+    }
+
+    float denom = 1.0 / (va + vb + vc);
+    float vFinal = vb * denom;
+    float wFinal = vc * denom;
+
+    return a + ab * vFinal + ac * wFinal;
+}
+
+void ResolveMeshCollisions(inout float3 pos, inout float3 vel)
+{
+    if (collisionObjectCount <= 0 || collisionTriangleCount <= 0)
+        return;
+
+    float3 worldPos = pos;
+    float3 worldVel = vel;
+
+    for (int objectIndex = 0; objectIndex < collisionObjectCount; objectIndex++)
+    {
+        CollisionObject obj = CollisionObjects[objectIndex];
+
+        float3 localPos = mul(obj.worldToLocal, float4(worldPos, 1)).xyz;
+        float3 localVel = mul((float3x3) obj.worldToLocal, worldVel);
+
+        int start = obj.triangleStartIndex;
+        int end = start + obj.triangleCount;
+
+        for (int triangleIndex = start; triangleIndex < end; triangleIndex++)
+        {
+            if (triangleIndex < 0 || triangleIndex >= collisionTriangleCount)
+                continue;
+
+            CollisionTriangle tri = CollisionTriangles[triangleIndex];
+
+            float3 closestPoint = ClosestPointOnTriangle(localPos, tri.a, tri.b, tri.c);
+
+            float3 diff = localPos - closestPoint;
+            float distSq = dot(diff, diff);
+
+            float thickness = obj.collisionThickness;
+            float thicknessSq = thickness * thickness;
+
+            if (distSq < thicknessSq)
+            {
+                float dist = sqrt(max(distSq, 1e-8));
+
+                float3 pushDir;
+
+                if (dist > 1e-5)
+                {
+                    pushDir = diff / dist;
+                }
+                else
+                {
+                    pushDir = normalize(tri.normal);
+                }
+
+                float penetration = thickness - dist;
+                localPos += pushDir * penetration;
+
+                float3 currentWorldPoint = mul(obj.localToWorld, float4(closestPoint, 1)).xyz;
+                float3 previousWorldPoint = mul(obj.previousLocalToWorld, float4(closestPoint, 1)).xyz;
+
+                float3 surfaceVelocityWorld = (currentWorldPoint - previousWorldPoint) / max(deltaTime, 1e-6);
+                float3 surfaceVelocityLocal = mul((float3x3) obj.worldToLocal, surfaceVelocityWorld);
+
+                float3 relativeVel = localVel - surfaceVelocityLocal;
+
+                float normalVel = dot(relativeVel, pushDir);
+
+                if (normalVel < 0)
+                {
+                    relativeVel -= (1.0 + obj.collisionDamping) * normalVel * pushDir;
+                }
+
+                float3 tangentVel = relativeVel - dot(relativeVel, pushDir) * pushDir;
+                relativeVel -= tangentVel * obj.friction;
+
+                localVel = relativeVel + surfaceVelocityLocal;
+            }
+        }
+
+        worldPos = mul(obj.localToWorld, float4(localPos, 1)).xyz;
+        worldVel = mul((float3x3) obj.localToWorld, localVel);
+    }
+
+    pos = worldPos;
+    vel = worldVel;
 }
 
 void ResolveCollisions(inout float3 pos, inout float3 vel, float collisionDamping)
@@ -492,7 +663,14 @@ void UpdatePositions(uint3 id : SV_DispatchThreadID)
     float3 pos = Positions[id.x];
     pos += vel * deltaTime;
 
-    ResolveCollisions(pos, vel, collisionDamping);
+    if (useMeshCollisions == 1)
+    {
+        ResolveMeshCollisions(pos, vel);
+    }
+    else
+    {
+        ResolveCollisions(pos, vel, collisionDamping);
+    }
 
     // Write results
     Positions[id.x] = pos;

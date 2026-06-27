@@ -5,6 +5,7 @@ using Unity.Mathematics;
 using System.Collections.Generic;
 using Seb.Helpers;
 using static Seb.Helpers.ComputeHelper;
+using Seb.Fluid.Collision;
 
 namespace Seb.Fluid.Simulation
 {
@@ -57,7 +58,10 @@ namespace Seb.Fluid.Simulation
 		public float viscosityStrength = 0;
 		[Range(0, 1)] public float collisionDamping = 0.95f;
 
-		[Header("Foam Settings")] public bool foamActive;
+        [Header("Collision")]
+        public bool useMeshCollisions = false;
+
+        [Header("Foam Settings")] public bool foamActive;
 		public int maxFoamParticleCount = 1000;
 		public float trappedAirSpawnRate = 70;
 		public float spawnRateFadeInTime = 0.5f;
@@ -75,8 +79,9 @@ namespace Seb.Fluid.Simulation
 
 		[Header("References")] public ComputeShader compute;
 		public Spawner3D spawner;
+        public MeshCollisionBuilder meshCollisionBuilder;
 
-		[HideInInspector] public RenderTexture DensityMap;
+        [HideInInspector] public RenderTexture DensityMap;
 		public Vector3 Scale => transform.localScale;
 
 		// Buffers
@@ -171,8 +176,20 @@ namespace Seb.Fluid.Simulation
 				{ debugBuffer, "Debug" }
 			};
 
-			// Set buffer data
-			SetInitialBufferData(spawnData);
+            if (meshCollisionBuilder != null) {
+                meshCollisionBuilder.Build();
+
+                if (meshCollisionBuilder.TriangleBuffer != null) {
+                    bufferNameLookup.Add(meshCollisionBuilder.TriangleBuffer, "CollisionTriangles");
+                }
+
+                if (meshCollisionBuilder.ObjectBuffer != null) {
+                    bufferNameLookup.Add(meshCollisionBuilder.ObjectBuffer, "CollisionObjects");
+                }
+            }
+
+            // Set buffer data
+            SetInitialBufferData(spawnData);
 
 			// External forces kernel
 			SetBuffers(compute, externalForcesKernel, bufferNameLookup, new ComputeBuffer[]
@@ -247,15 +264,27 @@ namespace Seb.Fluid.Simulation
 				spatialHash.SpatialOffsets
 			});
 
-			// Update positions kernel
-			SetBuffers(compute, updatePositionsKernel, bufferNameLookup, new ComputeBuffer[]
-			{
-				positionBuffer,
-				velocityBuffer
-			});
+            // Update positions kernel
+            if (meshCollisionBuilder != null &&
+                meshCollisionBuilder.TriangleBuffer != null &&
+                meshCollisionBuilder.ObjectBuffer != null) {
+                SetBuffers(compute, updatePositionsKernel, bufferNameLookup, new ComputeBuffer[]
+                {
+					positionBuffer,
+					velocityBuffer,
+					meshCollisionBuilder.TriangleBuffer,
+					meshCollisionBuilder.ObjectBuffer
+                });
+            } else {
+                SetBuffers(compute, updatePositionsKernel, bufferNameLookup, new ComputeBuffer[]
+                {
+					positionBuffer,
+					velocityBuffer
+                });
+            }
 
-			// Render to 3d tex kernel
-			SetBuffers(compute, renderKernel, bufferNameLookup, new ComputeBuffer[]
+            // Render to 3d tex kernel
+            SetBuffers(compute, renderKernel, bufferNameLookup, new ComputeBuffer[]
 			{
 				predictedPositionsBuffer,
 				densityBuffer,
@@ -437,12 +466,20 @@ namespace Seb.Fluid.Simulation
 			Vector3 simBoundsSize = transform.localScale;
 			Vector3 simBoundsCentre = transform.position;
 
-			compute.SetFloat("deltaTime", stepDeltaTime);
+            if (meshCollisionBuilder != null) {
+                meshCollisionBuilder.UpdateDynamicObjects();
+            }
+
+            compute.SetInt("collisionTriangleCount", meshCollisionBuilder != null ? meshCollisionBuilder.TriangleCount : 0);
+            compute.SetInt("collisionObjectCount", meshCollisionBuilder != null ? meshCollisionBuilder.ObjectCount : 0);
+
+            compute.SetFloat("deltaTime", stepDeltaTime);
 			compute.SetFloat("whiteParticleDeltaTime", frameDeltaTime);
 			compute.SetFloat("simTime", simTimer);
 			compute.SetFloat("gravity", gravity);
 			compute.SetFloat("collisionDamping", collisionDamping);
-			compute.SetFloat("smoothingRadius", smoothingRadius);
+            compute.SetInt("useMeshCollisions", useMeshCollisions ? 1 : 0);
+            compute.SetFloat("smoothingRadius", smoothingRadius);
 			compute.SetFloat("targetDensity", targetDensity);
 			compute.SetFloat("pressureMultiplier", pressureMultiplier);
 			compute.SetFloat("nearPressureMultiplier", nearPressureMultiplier);
@@ -589,18 +626,22 @@ namespace Seb.Fluid.Simulation
 				ApplyMaterialPreset();
 		}
 
-		void OnDestroy()
-		{
-			foreach (var kvp in bufferNameLookup)
-			{
-				Release(kvp.Key);
-			}
+        void OnDestroy() {
+            foreach (var kvp in bufferNameLookup) {
+                if (meshCollisionBuilder != null &&
+                    (kvp.Key == meshCollisionBuilder.TriangleBuffer ||
+                     kvp.Key == meshCollisionBuilder.ObjectBuffer)) {
+                    continue;
+                }
 
-			spatialHash.Release();
-		}
+                Release(kvp.Key);
+            }
+
+            spatialHash.Release();
+        }
 
 
-		public struct FoamParticle
+        public struct FoamParticle
 		{
 			public float3 position;
 			public float3 velocity;
