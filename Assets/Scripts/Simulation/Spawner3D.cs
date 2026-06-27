@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using Unity.Mathematics;
 using UnityEngine;
+using UnityEngine.Serialization;
 
 namespace Seb.Fluid.Simulation
 {
@@ -24,6 +25,7 @@ namespace Seb.Fluid.Simulation
 		{
 			List<float3> allPoints = new();
 			List<float3> allVelocities = new();
+			List<Color> allColors = new();
 
 			foreach (SpawnRegion region in spawnRegions)
 			{
@@ -32,42 +34,18 @@ namespace Seb.Fluid.Simulation
 				(float3[] points, float3[] velocities) = SpawnBucket(particlesPerAxis, region.centre, region.size);
 				allPoints.AddRange(points);
 				allVelocities.AddRange(velocities);
-			}
 
-			return new SpawnData() { points = allPoints.ToArray(), velocities = allVelocities.ToArray() };
-		}
-
-		(float3[] p, float3[] v) SpawnCube(int numPerAxis, Vector3 centre, Vector3 size)
-		{
-			int numPoints = numPerAxis * numPerAxis * numPerAxis;
-			float3[] points = new float3[numPoints];
-			float3[] velocities = new float3[numPoints];
-
-			int i = 0;
-
-			for (int x = 0; x < numPerAxis; x++)
-			{
-				for (int y = 0; y < numPerAxis; y++)
+				// Every particle spawned in this region permanently receives the region's paint color.
+				for (int i = 0; i < points.Length; i++)
 				{
-					for (int z = 0; z < numPerAxis; z++)
-					{
-						float tx = x / (numPerAxis - 1f);
-						float ty = y / (numPerAxis - 1f);
-						float tz = z / (numPerAxis - 1f);
-
-						float px = (tx - 0.5f) * size.x + centre.x;
-						float py = (ty - 0.5f) * size.y + centre.y;
-						float pz = (tz - 0.5f) * size.z + centre.z;
-						float3 jitter = UnityEngine.Random.insideUnitSphere * jitterStrength;
-						points[i] = new float3(px, py, pz) + jitter;
-						velocities[i] = initialVel;
-						i++;
-					}
+					allColors.Add(region.paintColor);
 				}
 			}
 
-			return (points, velocities);
+			return new SpawnData() { points = allPoints.ToArray(), velocities = allVelocities.ToArray(), colors = allColors.ToArray() };
 		}
+
+		
 
 		(float3[] p, float3[] v) SpawnBucket(int numPerAxis, Vector3 centre, float size)
 		{
@@ -167,7 +145,7 @@ namespace Seb.Fluid.Simulation
 			{
 				foreach (SpawnRegion region in spawnRegions)
 				{
-					Gizmos.color = region.debugDisplayCol;
+					Gizmos.color = region.paintColor;
 					Gizmos.DrawWireCube(region.centre, Vector3.one * region.size);
 				}
 			}
@@ -178,7 +156,12 @@ namespace Seb.Fluid.Simulation
 		{
 			public Vector3 centre;
 			public float size;
-			public Color debugDisplayCol;
+
+			// Renamed from "debugDisplayCol" -> kept the old serialized data (via FormerlySerializedAs) so existing
+			// regions don't lose their color when this field starts driving real particle colors too.
+			[FormerlySerializedAs("debugDisplayCol")]
+			[Tooltip("Permanent paint color for every particle spawned in this region. Also tints the gizmo wireframe in the Scene view.")]
+			public Color paintColor;
 
 			public float Volume => size * size * size;
 
@@ -194,6 +177,7 @@ namespace Seb.Fluid.Simulation
 		{
 			public float3[] points;
 			public float3[] velocities;
+			public Color[] colors;
 		}
 	}
 }
