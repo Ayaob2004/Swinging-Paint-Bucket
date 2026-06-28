@@ -58,8 +58,37 @@ struct CollisionObject
     int isDynamic;
 };
 
+struct GridCellData
+{
+    int entryStartIndex;
+    int entryCount;
+};
+
+struct GridEntryData
+{
+    int triangleIndex;
+};
+
+struct ObjectGridData
+{
+    float3 gridMin;
+    float gridCellSize;
+
+    int resolutionX;
+    int resolutionY;
+    int resolutionZ;
+
+    int cellStartIndex;
+    int cellCount;
+    int entryStartIndex;
+    int entryCount;
+};
+
 StructuredBuffer<CollisionTriangle> CollisionTriangles;
 StructuredBuffer<CollisionObject> CollisionObjects;
+StructuredBuffer<GridCellData> CollisionGridCells;
+StructuredBuffer<GridEntryData> CollisionGridEntries;
+StructuredBuffer<ObjectGridData> CollisionObjectGrids;
 
 int collisionTriangleCount;
 int collisionObjectCount;
@@ -68,9 +97,11 @@ int collisionObjectCount;
 const uint numParticles;
 const float gravity;
 const float deltaTime;
+float meshCollisionDeltaTime;
 const float simTime;
 const float collisionDamping;
 int useMeshCollisions;
+int useGridCollisionQuery;
 const float smoothingRadius;
 const float targetDensity;
 const float pressureMultiplier;
@@ -146,6 +177,26 @@ float BucketRadiusAtY(float y)
     float topRadius = 0.38;
 
     return lerp(bottomRadius, topRadius, t);
+}
+
+int FlattenGridIndex(int x, int y, int z, int resolutionX, int resolutionY)
+{
+    return x + resolutionX * (y + resolutionY * z);
+}
+
+bool IsCellInsideGrid(int x, int y, int z, ObjectGridData grid)
+{
+    return
+        x >= 0 && y >= 0 && z >= 0 &&
+        x < grid.resolutionX &&
+        y < grid.resolutionY &&
+        z < grid.resolutionZ;
+}
+
+int3 GetGridCellCoord(float3 localPos, ObjectGridData grid)
+{
+    float3 relative = (localPos - grid.gridMin) / max(grid.gridCellSize, 1e-6);
+    return (int3) floor(relative);
 }
 
 float3 ClosestPointOnTriangle(float3 p, float3 a, float3 b, float3 c)
@@ -234,8 +285,13 @@ void ResolveMeshCollisions(inout float3 pos, inout float3 vel)
 
             float3 diff = localPos - closestPoint;
             float distSq = dot(diff, diff);
-
+            
             float thickness = obj.collisionThickness;
+            
+            if (obj.isDynamic == 1)
+            {
+                thickness *= 3.0;
+            }
             float thicknessSq = thickness * thickness;
 
             if (distSq < thicknessSq)
@@ -259,7 +315,7 @@ void ResolveMeshCollisions(inout float3 pos, inout float3 vel)
                 float3 currentWorldPoint = mul(obj.localToWorld, float4(closestPoint, 1)).xyz;
                 float3 previousWorldPoint = mul(obj.previousLocalToWorld, float4(closestPoint, 1)).xyz;
 
-                float3 surfaceVelocityWorld = (currentWorldPoint - previousWorldPoint) / max(deltaTime, 1e-6);
+                float3 surfaceVelocityWorld = (currentWorldPoint - previousWorldPoint) / max(meshCollisionDeltaTime, 1e-6);
                 float3 surfaceVelocityLocal = mul((float3x3) obj.worldToLocal, surfaceVelocityWorld);
 
                 float3 relativeVel = localVel - surfaceVelocityLocal;
@@ -275,6 +331,127 @@ void ResolveMeshCollisions(inout float3 pos, inout float3 vel)
                 relativeVel -= tangentVel * obj.friction;
 
                 localVel = relativeVel + surfaceVelocityLocal;
+            }
+        }
+
+        worldPos = mul(obj.localToWorld, float4(localPos, 1)).xyz;
+        worldVel = mul((float3x3) obj.localToWorld, localVel);
+    }
+
+    pos = worldPos;
+    vel = worldVel;
+}
+
+void ResolveMeshCollisionsGrid(inout float3 pos, inout float3 vel)
+{
+    if (collisionObjectCount <= 0 || collisionTriangleCount <= 0)
+        return;
+
+    float3 worldPos = pos;
+    float3 worldVel = vel;
+
+    for (int objectIndex = 0; objectIndex < collisionObjectCount; objectIndex++)
+    {
+        CollisionObject obj = CollisionObjects[objectIndex];
+        ObjectGridData grid = CollisionObjectGrids[objectIndex];
+
+        float3 localPos = mul(obj.worldToLocal, float4(worldPos, 1)).xyz;
+        float3 localVel = mul((float3x3) obj.worldToLocal, worldVel);
+
+        int3 baseCell = GetGridCellCoord(localPos, grid);
+
+        for (int dz = -1; dz <= 1; dz++)
+        {
+            for (int dy = -1; dy <= 1; dy++)
+            {
+                for (int dx = -1; dx <= 1; dx++)
+                {
+                    int x = baseCell.x + dx;
+                    int y = baseCell.y + dy;
+                    int z = baseCell.z + dz;
+
+                    if (!IsCellInsideGrid(x, y, z, grid))
+                        continue;
+
+                    int localCellIndex = FlattenGridIndex(x, y, z, grid.resolutionX, grid.resolutionY);
+                    int globalCellIndex = grid.cellStartIndex + localCellIndex;
+
+                    if (localCellIndex < 0 || localCellIndex >= grid.cellCount)
+                        continue;
+
+                    GridCellData cell = CollisionGridCells[globalCellIndex];
+
+                    if (cell.entryCount <= 0)
+                        continue;
+
+                    for (int entryOffset = 0; entryOffset < cell.entryCount; entryOffset++)
+                    {
+                        int entryIndex = cell.entryStartIndex + entryOffset;
+
+                        if (entryIndex < grid.entryStartIndex ||
+                            entryIndex >= grid.entryStartIndex + grid.entryCount)
+                            continue;
+
+                        int triangleIndex = CollisionGridEntries[entryIndex].triangleIndex;
+
+                        if (triangleIndex < obj.triangleStartIndex ||
+                            triangleIndex >= obj.triangleStartIndex + obj.triangleCount)
+                            continue;
+
+                        CollisionTriangle tri = CollisionTriangles[triangleIndex];
+
+                        float3 closestPoint = ClosestPointOnTriangle(localPos, tri.a, tri.b, tri.c);
+
+                        float3 diff = localPos - closestPoint;
+                        float distSq = dot(diff, diff);
+
+                        float thickness = obj.collisionThickness;
+                        float thicknessSq = thickness * thickness;
+
+                        if (distSq < thicknessSq)
+                        {
+                            float dist = sqrt(max(distSq, 1e-8));
+
+                            float3 pushDir;
+
+                            if (dist > 1e-5)
+                            {
+                                pushDir = diff / dist;
+                            }
+                            else
+                            {
+                                pushDir = normalize(tri.normal);
+                            }
+
+                            float penetration = thickness - dist;
+                            localPos += pushDir * penetration;
+
+                            float3 currentWorldPoint = mul(obj.localToWorld, float4(closestPoint, 1)).xyz;
+                            float3 previousWorldPoint = mul(obj.previousLocalToWorld, float4(closestPoint, 1)).xyz;
+
+                            float3 surfaceVelocityWorld =
+                                (currentWorldPoint - previousWorldPoint) /
+                                max(meshCollisionDeltaTime, 1e-6);
+
+                            float3 surfaceVelocityLocal =
+                                mul((float3x3) obj.worldToLocal, surfaceVelocityWorld);
+
+                            float3 relativeVel = localVel - surfaceVelocityLocal;
+
+                            float normalVel = dot(relativeVel, pushDir);
+
+                            if (normalVel < 0)
+                            {
+                                relativeVel -= (1.0 + obj.collisionDamping) * normalVel * pushDir;
+                            }
+
+                            float3 tangentVel = relativeVel - dot(relativeVel, pushDir) * pushDir;
+                            relativeVel -= tangentVel * obj.friction;
+
+                            localVel = relativeVel + surfaceVelocityLocal;
+                        }
+                    }
+                }
             }
         }
 
@@ -665,7 +842,14 @@ void UpdatePositions(uint3 id : SV_DispatchThreadID)
 
     if (useMeshCollisions == 1)
     {
-        ResolveMeshCollisions(pos, vel);
+        if (useGridCollisionQuery == 1)
+        {
+            ResolveMeshCollisionsGrid(pos, vel);
+        }
+        else
+        {
+            ResolveMeshCollisions(pos, vel);
+        }
     }
     else
     {

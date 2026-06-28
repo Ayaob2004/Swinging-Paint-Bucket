@@ -60,6 +60,7 @@ namespace Seb.Fluid.Simulation
 
         [Header("Collision")]
         public bool useMeshCollisions = false;
+        public bool useGridCollisionQuery = false;
 
         [Header("Foam Settings")] public bool foamActive;
 		public int maxFoamParticleCount = 1000;
@@ -186,6 +187,18 @@ namespace Seb.Fluid.Simulation
                 if (meshCollisionBuilder.ObjectBuffer != null) {
                     bufferNameLookup.Add(meshCollisionBuilder.ObjectBuffer, "CollisionObjects");
                 }
+
+                if (meshCollisionBuilder.GridCellBuffer != null) {
+                    bufferNameLookup.Add(meshCollisionBuilder.GridCellBuffer, "CollisionGridCells");
+                }
+
+                if (meshCollisionBuilder.GridEntryBuffer != null) {
+                    bufferNameLookup.Add(meshCollisionBuilder.GridEntryBuffer, "CollisionGridEntries");
+                }
+
+                if (meshCollisionBuilder.ObjectGridBuffer != null) {
+                    bufferNameLookup.Add(meshCollisionBuilder.ObjectGridBuffer, "CollisionObjectGrids");
+                }
             }
 
             // Set buffer data
@@ -266,14 +279,20 @@ namespace Seb.Fluid.Simulation
 
             // Update positions kernel
             if (meshCollisionBuilder != null &&
-                meshCollisionBuilder.TriangleBuffer != null &&
-                meshCollisionBuilder.ObjectBuffer != null) {
+				meshCollisionBuilder.TriangleBuffer != null &&
+				meshCollisionBuilder.ObjectBuffer != null &&
+				meshCollisionBuilder.GridCellBuffer != null &&
+				meshCollisionBuilder.GridEntryBuffer != null &&
+				meshCollisionBuilder.ObjectGridBuffer != null) {
                 SetBuffers(compute, updatePositionsKernel, bufferNameLookup, new ComputeBuffer[]
                 {
 					positionBuffer,
 					velocityBuffer,
 					meshCollisionBuilder.TriangleBuffer,
-					meshCollisionBuilder.ObjectBuffer
+					meshCollisionBuilder.ObjectBuffer,
+					meshCollisionBuilder.GridCellBuffer,
+					meshCollisionBuilder.GridEntryBuffer,
+					meshCollisionBuilder.ObjectGridBuffer
                 });
             } else {
                 SetBuffers(compute, updatePositionsKernel, bufferNameLookup, new ComputeBuffer[]
@@ -474,11 +493,13 @@ namespace Seb.Fluid.Simulation
             compute.SetInt("collisionObjectCount", meshCollisionBuilder != null ? meshCollisionBuilder.ObjectCount : 0);
 
             compute.SetFloat("deltaTime", stepDeltaTime);
-			compute.SetFloat("whiteParticleDeltaTime", frameDeltaTime);
+            compute.SetFloat("meshCollisionDeltaTime", frameDeltaTime);
+            compute.SetFloat("whiteParticleDeltaTime", frameDeltaTime);
 			compute.SetFloat("simTime", simTimer);
 			compute.SetFloat("gravity", gravity);
 			compute.SetFloat("collisionDamping", collisionDamping);
             compute.SetInt("useMeshCollisions", useMeshCollisions ? 1 : 0);
+            compute.SetInt("useGridCollisionQuery", useGridCollisionQuery ? 1 : 0);
             compute.SetFloat("smoothingRadius", smoothingRadius);
 			compute.SetFloat("targetDensity", targetDensity);
 			compute.SetFloat("pressureMultiplier", pressureMultiplier);

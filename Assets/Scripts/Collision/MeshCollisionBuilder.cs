@@ -7,6 +7,10 @@ namespace Seb.Fluid.Collision {
         public bool autoFindObjects = true;
         public List<MeshCollisionObject> collisionObjects = new();
 
+        [Header("Grid Settings")]
+        [Min(0.001f)]
+        public float gridCellSize = 0.2f;
+
         [Header("Debug")]
         public bool logObjectDetails = true;
 
@@ -17,11 +21,21 @@ namespace Seb.Fluid.Collision {
         readonly List<ObjectData> objects = new();
         readonly List<string> objectNames = new();
 
+        readonly List<GridCellData> gridCells = new();
+        readonly List<GridEntryData> gridEntries = new();
+        readonly List<ObjectGridData> objectGrids = new();
+
         ComputeBuffer triangleBuffer;
         ComputeBuffer objectBuffer;
-
+        ComputeBuffer gridCellBuffer;
+        ComputeBuffer gridEntryBuffer;
+        ComputeBuffer objectGridBuffer;
         public ComputeBuffer TriangleBuffer => triangleBuffer;
         public ComputeBuffer ObjectBuffer => objectBuffer;
+
+        public ComputeBuffer GridCellBuffer => gridCellBuffer;
+        public ComputeBuffer GridEntryBuffer => gridEntryBuffer;
+        public ComputeBuffer ObjectGridBuffer => objectGridBuffer;
         public int TriangleCount => triangleCount;
         public int ObjectCount => objectCount;
 
@@ -64,6 +78,11 @@ namespace Seb.Fluid.Collision {
             objects.Clear();
             objectNames.Clear();
 
+            gridCells.Clear();
+            gridEntries.Clear();
+
+            objectGrids.Clear();
+
             objectCount = 0;
             triangleCount = 0;
 
@@ -82,6 +101,11 @@ namespace Seb.Fluid.Collision {
 
                 int triangleStartIndex = triangles.Count;
                 int meshTriangleCount = mesh.triangles.Length / 3;
+
+                DebugGridInfoForObject(mesh, obj.name);
+
+                ObjectGridData objectGrid = BuildGridForObject(mesh, obj.name, triangleStartIndex);
+                objectGrids.Add(objectGrid);
 
                 objectNames.Add(obj.name);
 
@@ -127,6 +151,146 @@ namespace Seb.Fluid.Collision {
             triangleCount = triangles.Count;
         }
 
+        void DebugGridInfoForObject(Mesh mesh, string objectName) {
+            Bounds bounds = mesh.bounds;
+
+            Vector3 min = bounds.min;
+            Vector3 size = bounds.size;
+
+            int resolutionX = Mathf.Max(1, Mathf.CeilToInt(size.x / gridCellSize));
+            int resolutionY = Mathf.Max(1, Mathf.CeilToInt(size.y / gridCellSize));
+            int resolutionZ = Mathf.Max(1, Mathf.CeilToInt(size.z / gridCellSize));
+
+            int totalCells = resolutionX * resolutionY * resolutionZ;
+
+            Debug.Log(
+                $"[MeshCollisionBuilder] Grid {objectName}: " +
+                $"min={min}, size={size}, " +
+                $"resolution=({resolutionX}, {resolutionY}, {resolutionZ}), " +
+                $"totalCells={totalCells}, cellSize={gridCellSize}"
+            );
+        }
+
+        int FlattenGridIndex(int x, int y, int z, int resolutionX, int resolutionY) {
+            return x + resolutionX * (y + resolutionY * z);
+        }
+
+        Vector3Int WorldToGridCell(Vector3 localPoint, Vector3 gridMin, int resolutionX, int resolutionY, int resolutionZ) {
+            Vector3 relative = (localPoint - gridMin) / gridCellSize;
+
+            int x = Mathf.Clamp(Mathf.FloorToInt(relative.x), 0, resolutionX - 1);
+            int y = Mathf.Clamp(Mathf.FloorToInt(relative.y), 0, resolutionY - 1);
+            int z = Mathf.Clamp(Mathf.FloorToInt(relative.z), 0, resolutionZ - 1);
+
+            return new Vector3Int(x, y, z);
+        }
+
+        ObjectGridData BuildGridForObject(Mesh mesh, string objectName, int triangleStartIndex) {
+            Bounds bounds = mesh.bounds;
+
+            Vector3 gridMin = bounds.min;
+            Vector3 size = bounds.size;
+
+            int resolutionX = Mathf.Max(1, Mathf.CeilToInt(size.x / gridCellSize));
+            int resolutionY = Mathf.Max(1, Mathf.CeilToInt(size.y / gridCellSize));
+            int resolutionZ = Mathf.Max(1, Mathf.CeilToInt(size.z / gridCellSize));
+
+            int totalCells = resolutionX * resolutionY * resolutionZ;
+
+            List<int>[] temporaryCells = new List<int>[totalCells];
+
+            Vector3[] vertices = mesh.vertices;
+            int[] meshTriangles = mesh.triangles;
+
+            for (int i = 0; i < meshTriangles.Length; i += 3) {
+                Vector3 a = vertices[meshTriangles[i]];
+                Vector3 b = vertices[meshTriangles[i + 1]];
+                Vector3 c = vertices[meshTriangles[i + 2]];
+
+                Vector3 min = Vector3.Min(a, Vector3.Min(b, c));
+                Vector3 max = Vector3.Max(a, Vector3.Max(b, c));
+
+                Vector3Int minCell = WorldToGridCell(min, gridMin, resolutionX, resolutionY, resolutionZ);
+                Vector3Int maxCell = WorldToGridCell(max, gridMin, resolutionX, resolutionY, resolutionZ);
+
+                int globalTriangleIndex = triangleStartIndex + (i / 3);
+
+                for (int z = minCell.z; z <= maxCell.z; z++) {
+                    for (int y = minCell.y; y <= maxCell.y; y++) {
+                        for (int x = minCell.x; x <= maxCell.x; x++) {
+                            int cellIndex = FlattenGridIndex(x, y, z, resolutionX, resolutionY);
+
+                            if (temporaryCells[cellIndex] == null) {
+                                temporaryCells[cellIndex] = new List<int>();
+                            }
+
+                            temporaryCells[cellIndex].Add(globalTriangleIndex);
+                        }
+                    }
+                }
+            }
+
+            int cellStartIndex = gridCells.Count;
+            int entryStartIndex = gridEntries.Count;
+
+            int occupiedCells = 0;
+            int totalEntries = 0;
+            int maxTrianglesInCell = 0;
+
+            for (int i = 0; i < temporaryCells.Length; i++) {
+                List<int> cellTriangles = temporaryCells[i];
+
+                if (cellTriangles == null || cellTriangles.Count == 0) {
+                    gridCells.Add(new GridCellData {
+                        entryStartIndex = -1,
+                        entryCount = 0
+                    });
+
+                    continue;
+                }
+
+                int cellEntryStart = gridEntries.Count;
+
+                for (int j = 0; j < cellTriangles.Count; j++) {
+                    gridEntries.Add(new GridEntryData {
+                        triangleIndex = cellTriangles[j]
+                    });
+                }
+
+                gridCells.Add(new GridCellData {
+                    entryStartIndex = cellEntryStart,
+                    entryCount = cellTriangles.Count
+                });
+
+                occupiedCells++;
+                totalEntries += cellTriangles.Count;
+                maxTrianglesInCell = Mathf.Max(maxTrianglesInCell, cellTriangles.Count);
+            }
+
+            float averageTrianglesPerOccupiedCell =
+                occupiedCells > 0 ? totalEntries / (float)occupiedCells : 0f;
+
+            Debug.Log(
+                $"[MeshCollisionBuilder] GridBuilt {objectName}: " +
+                $"cells={totalCells}, occupiedCells={occupiedCells}, " +
+                $"entries={totalEntries}, avgTrisPerOccupiedCell={averageTrianglesPerOccupiedCell:F2}, " +
+                $"maxTrisInCell={maxTrianglesInCell} + " +
+                $"cellStartIndex={cellStartIndex}, entryStartIndex={entryStartIndex}"
+            );
+
+            return new ObjectGridData {
+                gridMin = gridMin,
+                gridCellSize = gridCellSize,
+                resolutionX = resolutionX,
+                resolutionY = resolutionY,
+                resolutionZ = resolutionZ,
+                cellStartIndex = cellStartIndex,
+                cellCount = totalCells,
+                entryStartIndex = entryStartIndex,
+                entryCount = totalEntries
+            };
+        }
+
         void CreateBuffers() {
             ReleaseBuffers();
 
@@ -139,6 +303,21 @@ namespace Seb.Fluid.Collision {
                 objectBuffer = new ComputeBuffer(objectCount, ObjectData.Stride);
                 objectBuffer.SetData(objects);
             }
+
+            if (gridCells.Count > 0) {
+                gridCellBuffer = new ComputeBuffer(gridCells.Count, GridCellData.Stride);
+                gridCellBuffer.SetData(gridCells);
+            }
+
+            if (gridEntries.Count > 0) {
+                gridEntryBuffer = new ComputeBuffer(gridEntries.Count, GridEntryData.Stride);
+                gridEntryBuffer.SetData(gridEntries);
+            }
+
+            if (objectGrids.Count > 0) {
+                objectGridBuffer = new ComputeBuffer(objectGrids.Count, ObjectGridData.Stride);
+                objectGridBuffer.SetData(objectGrids);
+            }
         }
 
         void ReleaseBuffers() {
@@ -150,6 +329,21 @@ namespace Seb.Fluid.Collision {
             if (objectBuffer != null) {
                 objectBuffer.Release();
                 objectBuffer = null;
+            }
+
+            if (gridCellBuffer != null) {
+                gridCellBuffer.Release();
+                gridCellBuffer = null;
+            }
+
+            if (gridEntryBuffer != null) {
+                gridEntryBuffer.Release();
+                gridEntryBuffer = null;
+            }
+
+            if (objectGridBuffer != null) {
+                objectGridBuffer.Release();
+                objectGridBuffer = null;
             }
         }
 
@@ -168,7 +362,10 @@ namespace Seb.Fluid.Collision {
             Debug.Log(
                 $"[MeshCollisionBuilder] GPU buffers created: " +
                 $"TriangleBuffer={(triangleBuffer != null ? triangleBuffer.count : 0)}, " +
-                $"ObjectBuffer={(objectBuffer != null ? objectBuffer.count : 0)}"
+                $"ObjectBuffer={(objectBuffer != null ? objectBuffer.count : 0)}, " +
+                $"GridCellBuffer={(gridCellBuffer != null ? gridCellBuffer.count : 0)}, " +
+                $"GridEntryBuffer={(gridEntryBuffer != null ? gridEntryBuffer.count : 0)}, " +
+                $"ObjectGridBuffer={(objectGridBuffer != null ? objectGridBuffer.count : 0)}"
             );
         }
 
@@ -221,6 +418,47 @@ namespace Seb.Fluid.Collision {
                 sizeof(float) * 3 +   // c
                 sizeof(float) * 3 +   // normal
                 sizeof(int);          // objectIndex
+        }
+
+        struct GridCellData {
+            public int entryStartIndex;
+            public int entryCount;
+
+            public const int Stride =
+                sizeof(int) +    // entryStartIndex
+                sizeof(int);     // entryCount
+        }
+
+        struct GridEntryData {
+            public int triangleIndex;
+
+            public const int Stride =
+                sizeof(int);     // triangleIndex
+        }
+
+        struct ObjectGridData {
+            public Vector3 gridMin;
+            public float gridCellSize;
+
+            public int resolutionX;
+            public int resolutionY;
+            public int resolutionZ;
+
+            public int cellStartIndex;
+            public int cellCount;
+            public int entryStartIndex;
+            public int entryCount;
+
+            public const int Stride =
+                sizeof(float) * 3 +   // gridMin
+                sizeof(float) +       // gridCellSize
+                sizeof(int) +         // resolutionX
+                sizeof(int) +         // resolutionY
+                sizeof(int) +         // resolutionZ
+                sizeof(int) +         // cellStartIndex
+                sizeof(int) +         // cellCount
+                sizeof(int) +         // entryStartIndex
+                sizeof(int);          // entryCount
         }
 
         struct ObjectData {
