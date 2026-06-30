@@ -35,7 +35,7 @@ namespace Seb.Fluid.Rendering
 
 		[Header("References")]
 		public FluidSim sim;
-		public Transform cubeTransform;
+		// public Transform cubeTransform;
 		public Shader shader;
 
 		Material raymarchMat;
@@ -134,8 +134,8 @@ namespace Seb.Fluid.Rendering
 			raymarchMat.SetVector("extinctionCoeff", extinctionCoefficients);
 			raymarchMat.SetColor("fluidColor", fluidColor);
 			raymarchMat.SetFloat("paintOpacity", paintOpacity);
-			raymarchMat.SetMatrix("cubeLocalToWorld", Matrix4x4.TRS(cubeTransform.position, cubeTransform.rotation, cubeTransform.localScale / 2));
-			raymarchMat.SetMatrix("cubeWorldToLocal", Matrix4x4.TRS(cubeTransform.position, cubeTransform.rotation, cubeTransform.localScale / 2).inverse);
+			// raymarchMat.SetMatrix("cubeLocalToWorld", Matrix4x4.TRS(cubeTransform.position, cubeTransform.rotation, cubeTransform.localScale / 2));
+			// raymarchMat.SetMatrix("cubeWorldToLocal", Matrix4x4.TRS(cubeTransform.position, cubeTransform.rotation, cubeTransform.localScale / 2).inverse);
 			
 			Vector3 floorSize = new Vector3(30, 0.05f, 30);
 			float floorHeight = -sim.Scale.y / 2 + sim.transform.position.y - floorSize.y/2;
@@ -145,26 +145,26 @@ namespace Seb.Fluid.Rendering
 
 		public static void SetEnvironmentParams(Material mat, EnvironmentSettings environmentSettings)
 		{
-			mat.SetColor("tileCol1", environmentSettings.tileCol1);
-			mat.SetColor("tileCol2", environmentSettings.tileCol2);
-			mat.SetColor("tileCol3", environmentSettings.tileCol3);
-			mat.SetColor("tileCol4", environmentSettings.tileCol4);
-			mat.SetVector("tileColVariation", environmentSettings.tileColVariation);
-			mat.SetFloat("tileScale", environmentSettings.tileScale);
-			mat.SetFloat("tileDarkOffset", environmentSettings.tileDarkOffset);
+			// mat.SetColor("tileCol1", environmentSettings.tileCol1);
+			// mat.SetColor("tileCol2", environmentSettings.tileCol2);
+			// mat.SetColor("tileCol3", environmentSettings.tileCol3);
+			// mat.SetColor("tileCol4", environmentSettings.tileCol4);
+			// mat.SetVector("tileColVariation", environmentSettings.tileColVariation);
+			// mat.SetFloat("tileScale", environmentSettings.tileScale);
+			// mat.SetFloat("tileDarkOffset", environmentSettings.tileDarkOffset);
 			mat.SetVector("dirToSun", -environmentSettings.light.transform.forward);
 		}
 
 		[System.Serializable]
 		public struct EnvironmentSettings
 		{
-			public Color tileCol1;
-			public Color tileCol2;
-			public Color tileCol3;
-			public Color tileCol4;
-			public Vector3 tileColVariation;
-			public float tileScale;
-			public float tileDarkOffset;
+			// public Color tileCol1;
+			// public Color tileCol2;
+			// public Color tileCol3;
+			// public Color tileCol4;
+			// public Vector3 tileColVariation;
+			// public float tileScale;
+			// public float tileDarkOffset;
 			public Light light;
 		}
 	}

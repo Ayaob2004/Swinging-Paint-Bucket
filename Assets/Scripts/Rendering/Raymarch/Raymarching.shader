@@ -38,7 +38,7 @@ Shader "Fluid/Raymarching"
                 o.viewVector = mul(unity_CameraToWorld, float4(viewVector, 0));
                 return o;
             }
-
+            sampler2D _MainTex;
             Texture3D<float4> DensityMap;
             SamplerState linearClampSampler;
 
@@ -66,8 +66,8 @@ Shader "Fluid/Raymarching"
             const float tileScale;
             const float tileDarkOffset;
 
-            const float4x4 cubeLocalToWorld;
-            const float4x4 cubeWorldToLocal;
+            // const float4x4 cubeLocalToWorld;
+            // const float4x4 cubeWorldToLocal;
             const float3 floorPos;
             const float3 floorSize;
             
@@ -469,102 +469,7 @@ Shader "Fluid/Raymarching"
                 if (hitInfo.didHit) hitInfo.dst = length(hitInfo.hitPoint - rayPos);
                 return hitInfo;
             }
-
-            HitInfo RayBoxWithMatrix(float3 rayPos, float3 rayDir, float4x4 localToWorld, float4x4 worldToLocal)
-            {
-                float3 posLocal = mul(worldToLocal, float4(rayPos, 1));
-                float3 dirLocal = mul(worldToLocal, float4(rayDir, 0));
-                HitInfo hitInfo = RayUnitBox(posLocal, dirLocal);
-                hitInfo.normal = normalize(mul(localToWorld, float4(hitInfo.normal, 0)));
-                hitInfo.hitPoint = mul(localToWorld, float4(hitInfo.hitPoint, 1));
-                if (hitInfo.didHit) hitInfo.dst = length(hitInfo.hitPoint - rayPos);
-                return hitInfo;
-            }
             
-            float BucketSDF(float3 p)
-            {
-                // Bucket body dimensions in local space
-                float bottomY = -0.9;
-                float topY = 0.75;
-
-                float t = saturate((p.y - bottomY) / (topY - bottomY));
-                float radius = lerp(0.48, 0.82, t);
-
-                float r = length(p.xz);
-
-                // Thin conical side wall
-                float side = abs(r - radius) - 0.035;
-
-                // Limit side wall vertically
-                float verticalLimit = max(bottomY - p.y, p.y - topY);
-                float body = max(side, verticalLimit);
-
-                // Top thick rim
-                float rim = length(float2(r - 0.82, p.y - topY)) - 0.075;
-
-                // Bottom disk
-                float bottomDisk = max(r - 0.5, abs(p.y - bottomY) - 0.055);
-
-                // Small lower foot/ring
-                float foot = length(float2(r - 0.52, p.y - (bottomY - 0.05))) - 0.045;
-
-                return min(min(body, rim), min(bottomDisk, foot));
-            }
-
-float3 BucketNormal(float3 p)
-{
-    float e = 0.002;
-    float3 n;
-    n.x = BucketSDF(p + float3(e, 0, 0)) - BucketSDF(p - float3(e, 0, 0));
-    n.y = BucketSDF(p + float3(0, e, 0)) - BucketSDF(p - float3(0, e, 0));
-    n.z = BucketSDF(p + float3(0, 0, e)) - BucketSDF(p - float3(0, 0, e));
-    return normalize(n);
-}
-
-HitInfo RayBucketWithMatrix(float3 rayPos, float3 rayDir, float4x4 localToWorld, float4x4 worldToLocal)
-{
-    float3 posLocal = mul(worldToLocal, float4(rayPos, 1)).xyz;
-    float3 dirLocal = normalize(mul(worldToLocal, float4(rayDir, 0)).xyz);
-
-    HitInfo hitInfo = (HitInfo)0;
-    hitInfo.dst = 1.#INF;
-    hitInfo.didHit = false;
-    hitInfo.isInside = BucketSDF(posLocal) < 0;
-
-    float t = 0;
-    const int maxSteps = 96;
-    const float hitEpsilon = 0.003;
-    const float maxDistance = 20.0;
-
-    for (int i = 0; i < maxSteps; i++)
-    {
-        float3 p = posLocal + dirLocal * t;
-        float d = BucketSDF(p);
-
-        if (abs(d) < hitEpsilon)
-        {
-            float3 worldHit = mul(localToWorld, float4(p, 1)).xyz;
-            float3 localNormal = BucketNormal(p);
-            float3 worldNormal = normalize(mul(localToWorld, float4(localNormal, 0)).xyz);
-
-            hitInfo.didHit = true;
-            hitInfo.hitPoint = worldHit;
-            hitInfo.normal = hitInfo.isInside ? -worldNormal : worldNormal;
-            hitInfo.dst = length(worldHit - rayPos);
-            return hitInfo;
-        }
-
-        t += max(abs(d), 0.006);
-
-        if (t > maxDistance)
-        {
-            break;
-        }
-    }
-
-    return hitInfo;
-}
-
             float Modulo(float x, float y)
             {
                 return (x - y * floor(x / y));
@@ -654,7 +559,7 @@ HitInfo RayBucketWithMatrix(float3 rayPos, float3 rayDir, float4x4 localToWorld,
                 return SampleEnvironmentAA(pos, dir);
             }
 
-            float3 RayMarchFluid(float2 uv, float stepSize)
+            float3 RayMarchFluid(float2 uv, float stepSize, float3 sceneColor)
             {
                 uint rngState = (uint)(uv.x * 1243 + uv.y * 96456);
 
@@ -673,10 +578,10 @@ HitInfo RayBucketWithMatrix(float3 rayPos, float3 rayDir, float4x4 localToWorld,
                     999999
                 );
 
-                // ما في سائل أمام الكاميرا: ارسم البيئة عادي
+                // لا يوجد سائل أمام الكاميرا: اترك صورة المشهد الأصلية كما هي
                 if (!surfaceInfo.foundSurface)
                 {
-                    return Light(rayPos, rayDir);
+                    return sceneColor;
                 }
 
                 float3 normal = CalculateNormal(surfaceInfo.pos);
@@ -698,16 +603,18 @@ HitInfo RayBucketWithMatrix(float3 rayPos, float3 rayDir, float4x4 localToWorld,
 
                 float3 paintLit = fluidColor.rgb * (0.45 + 0.75 * diffuse) + specular.xxx;
 
-                float3 environment = Light(rayPos, rayDir);
+                // استخدم صورة المشهد الأصلية كخلفية بدل السماء والأرضية التجريبية
+                float3 environment = sceneColor;
 
-                // paintOpacity = 1 يعني بدون شفافية
+                // paintOpacity = 1 يعني السائل غير شفاف
                 return lerp(environment, paintLit, saturate(paintOpacity));
             }
 
 
             float4 frag(v2f i) : SV_Target
             {
-                return float4(RayMarchFluid(i.uv, viewMarchStepSize), 1);
+                float3 sceneColor = tex2D(_MainTex, i.uv).rgb;
+                return float4(RayMarchFluid(i.uv, viewMarchStepSize, sceneColor), 1);
             }
             
             ENDCG
