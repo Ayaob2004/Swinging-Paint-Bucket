@@ -66,8 +66,9 @@ Shader "Fluid/Raymarching"
             const float tileScale;
             const float tileDarkOffset;
 
-            // const float4x4 cubeLocalToWorld;
-            // const float4x4 cubeWorldToLocal;
+            float4x4 densityVolumeLocalToWorld;
+            float4x4 densityVolumeWorldToLocal;
+
             const float3 floorPos;
             const float3 floorSize;
             
@@ -255,6 +256,30 @@ Shader "Fluid/Raymarching"
                 float dstToBox = max(0, dstA);
                 float dstInsideBox = max(0, dstB - dstToBox);
                 return float2(dstToBox, dstInsideBox);
+            }
+
+            float3 WorldToDensityVolumePoint(float3 worldPoint)
+            {
+                return mul(densityVolumeWorldToLocal, float4(worldPoint, 1)).xyz;
+            }
+
+            float3 WorldToDensityVolumeDirection(float3 worldDirection)
+            {
+                return normalize(
+                    mul((float3x3)densityVolumeWorldToLocal, worldDirection)
+                );
+            }
+
+            float3 DensityVolumeToWorldPoint(float3 localPoint)
+            {
+                return mul(densityVolumeLocalToWorld, float4(localPoint, 1)).xyz;
+            }
+
+            float3 DensityVolumeToWorldDirection(float3 localDirection)
+            {
+                return normalize(
+                    mul((float3x3)densityVolumeLocalToWorld, localDirection)
+                );
             }
 
             float SampleDensity(float3 pos)
@@ -564,14 +589,26 @@ Shader "Fluid/Raymarching"
                 uint rngState = (uint)(uv.x * 1243 + uv.y * 96456);
 
                 float3 localViewVector = mul(unity_CameraInvProjection, float4(uv * 2 - 1, 0, -1));
-                float3 rayDir = normalize(mul(unity_CameraToWorld, float4(localViewVector, 0)));
-                float3 rayPos = _WorldSpaceCameraPos.xyz;
 
-                bool travellingThroughFluid = IsInsideFluid(rayPos);
+                // شعاع الكاميرا في World Space
+                float3 worldRayDir =
+                    normalize(mul(unity_CameraToWorld, float4(localViewVector, 0)));
+
+                float3 worldRayPos = _WorldSpaceCameraPos.xyz;
+
+                // نحوله إلى Local Space الخاص بحجم DensityMap
+                float3 densityVolumeRayPos =
+                    WorldToDensityVolumePoint(worldRayPos);
+
+                float3 densityVolumeRayDir =
+                    WorldToDensityVolumeDirection(worldRayDir);
+
+                // من هنا فصاعدًا، Raymarching يعمل في نفس Local Space الخاص بـ DensityMap
+                bool travellingThroughFluid = IsInsideFluid(densityVolumeRayPos);
 
                 SurfaceInfo surfaceInfo = FindNextSurface(
-                    rayPos,
-                    rayDir,
+                    densityVolumeRayPos,
+                    densityVolumeRayDir,
                     !travellingThroughFluid,
                     rngState,
                     1,
@@ -584,21 +621,39 @@ Shader "Fluid/Raymarching"
                     return sceneColor;
                 }
 
+                // surfaceInfo.pos و normal يعملان في Density Volume Local Space
                 float3 normal = CalculateNormal(surfaceInfo.pos);
-                if (dot(normal, rayDir) > 0)
+
+                // densityVolumeRayDir محلي أيضًا، لذلك المقارنة يجب أن تبقى محلية
+                if (dot(normal, densityVolumeRayDir) > 0)
                 {
                     normal = -normal;
                 }
 
-                float3 lightDir = normalize(dirToSun);
-                float3 viewDir = normalize(_WorldSpaceCameraPos.xyz - surfaceInfo.pos);
+                // اتجاه الشمس يبدأ في World Space، ثم نُحوّله إلى Local Space الخاص بالـ DensityMap
+                float3 worldLightDir = normalize(dirToSun);
+                float3 densityVolumeLightDir =
+                    WorldToDensityVolumeDirection(worldLightDir);
 
-                float diffuse = saturate(dot(normal, lightDir));
-                float3 halfDir = normalize(lightDir + viewDir);
-                float specular = pow(saturate(dot(normal, halfDir)), 48) * 0.18;
+                // موضع الكاميرا المحلي ناقص موضع السطح المحلي = اتجاه النظر المحلي
+                float3 densityVolumeViewDir =
+                    normalize(densityVolumeRayPos - surfaceInfo.pos);
 
+                float diffuse = saturate(dot(normal, densityVolumeLightDir));
+
+                float3 halfDir =
+                    normalize(densityVolumeLightDir + densityVolumeViewDir);
+
+                float specular =
+                    pow(saturate(dot(normal, halfDir)), 48) * 0.18;
+
+                // تتبع الظل داخل DensityMap يجب أن يبقى في Local Space
                 float3 shadow = Transmittance(
-                    CalculateDensityAlongRay(surfaceInfo.pos + normal * TinyNudge * 4, lightDir, lightStepSize * 2) * 1.5
+                    CalculateDensityAlongRay(
+                        surfaceInfo.pos + normal * TinyNudge * 4,
+                        densityVolumeLightDir,
+                        lightStepSize * 2
+                    ) * 1.5
                 );
 
                 float3 paintLit = fluidColor.rgb * (0.45 + 0.75 * diffuse) + specular.xxx;

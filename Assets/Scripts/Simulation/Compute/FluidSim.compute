@@ -113,6 +113,8 @@ const float3 boundsSize;
 
 const float4x4 localToWorld;
 const float4x4 worldToLocal;
+float4x4 densityVolumeLocalToWorld;
+float4x4 densityVolumeWorldToLocal;
 
 const float2 interactionInputPoint;
 const float interactionInputStrength;
@@ -867,10 +869,15 @@ void UpdateDensityTexture(uint3 id : SV_DispatchThreadID)
     if (id.x >= densityMapSize.x || id.y >= densityMapSize.y || id.z >= densityMapSize.z)
         return;
 
-    // Convert threadID to a world-space position, and sample the fluid density at that point
+    // كل voxel في DensityMap له موضع محلي بالنسبة إلى الـ Simulation
     float3 texturePos = id / (densityMapSize - 1.0);
-    float3 worldPos = (texturePos - 0.5) * boundsSize;
-    DensityMap[id] = CalculateDensitiesAtPoint(worldPos)[0];
+    float3 localVoxelPos = (texturePos - 0.5) * boundsSize;
+
+    // نحوله إلى World Space لأن Positions الخاصة بالجزيئات موجودة في World Space
+    float3 worldVoxelPos =
+        mul(densityVolumeLocalToWorld, float4(localVoxelPos, 1)).xyz;
+
+    DensityMap[id] = CalculateDensitiesAtPoint(worldVoxelPos)[0];
 }
 
 float3 VolumeCoordToLocalPos(float3 volumeCoord01)
@@ -900,13 +907,24 @@ void SplatDensityFromParticles(uint3 id : SV_DispatchThreadID)
     if (id.x >= numParticles)
         return;
 
-    float3 pos = Positions[id.x];
-    float3 volumeCoord = LocalPosToVolumeCoord(pos);
-    float3 voxelWorldSize = boundsSize / max(1.0, (float3)(densityMapSize - 1));
-    float minVoxelSize = min(voxelWorldSize.x, min(voxelWorldSize.y, voxelWorldSize.z));
-    int splatRadiusVoxels = (int)ceil(smoothingRadius / minVoxelSize) + 1;
+    // موضع الجسيم محفوظ في World Space
+    float3 worldParticlePos = Positions[id.x];
 
-    int3 centerVoxel = (int3)round(volumeCoord * (densityMapSize - 1.0));
+    // نحوله إلى Local Space الخاص بحجم الـ DensityMap.
+    // هذه المصفوفة تحتوي Position + Rotation فقط، بدون Scale.
+    float3 localParticlePos =
+    mul(densityVolumeWorldToLocal, float4(worldParticlePos, 1)).xyz;
+
+    float3 volumeCoord = LocalPosToVolumeCoord(localParticlePos);
+
+    float3 voxelLocalSize =
+    boundsSize / max(1.0, (float3) (densityMapSize - 1));
+
+    float minVoxelSize =
+    min(voxelLocalSize.x, min(voxelLocalSize.y, voxelLocalSize.z));
+    int splatRadiusVoxels = (int) ceil(smoothingRadius / minVoxelSize) + 1;
+
+    int3 centerVoxel = (int3) round(volumeCoord * (densityMapSize - 1.0));
 
     for (int dz = -splatRadiusVoxels; dz <= splatRadiusVoxels; dz++)
     {
@@ -915,12 +933,12 @@ void SplatDensityFromParticles(uint3 id : SV_DispatchThreadID)
             for (int dx = -splatRadiusVoxels; dx <= splatRadiusVoxels; dx++)
             {
                 int3 voxel = centerVoxel + int3(dx, dy, dz);
-                if (any(voxel < 0) || voxel.x >= (int)densityMapSize.x || voxel.y >= (int)densityMapSize.y || voxel.z >= (int)densityMapSize.z)
+                if (any(voxel < 0) || voxel.x >= (int) densityMapSize.x || voxel.y >= (int) densityMapSize.y || voxel.z >= (int) densityMapSize.z)
                     continue;
 
-                float3 voxelCoord01 = voxel / (float3)(densityMapSize - 1.0);
+                float3 voxelCoord01 = voxel / (float3) (densityMapSize - 1.0);
                 float3 voxelLocalPos = VolumeCoordToLocalPos(voxelCoord01);
-                float dst = length(voxelLocalPos - pos);
+                float dst = length(voxelLocalPos - localParticlePos);
                 float density = DensityKernel(dst, smoothingRadius);
 
                 if (density > 0)

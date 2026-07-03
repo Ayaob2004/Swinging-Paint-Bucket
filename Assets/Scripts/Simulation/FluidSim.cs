@@ -507,14 +507,24 @@ namespace Seb.Fluid.Simulation
 			compute.SetFloat("viscosityStrength", viscosityStrength);
 			compute.SetFloat("predictionTimestep", predictionTimestep);
 			compute.SetInt("foamEnabled", foamActive ? 1 : 0);
+
 			compute.SetVector("boundsSize", simBoundsSize);
 			compute.SetVector("centre", simBoundsCentre);
 
 			compute.SetMatrix("localToWorld", transform.localToWorldMatrix);
 			compute.SetMatrix("worldToLocal", transform.worldToLocalMatrix);
 
-			// Foam settings
-			float fadeInT = (spawnRateFadeInTime <= 0) ? 1 : Mathf.Clamp01((simTimer - spawnRateFadeStartTime) / spawnRateFadeInTime);
+            Matrix4x4 densityVolumeLocalToWorld =
+				Matrix4x4.TRS(transform.position, transform.rotation, Vector3.one);
+
+            Matrix4x4 densityVolumeWorldToLocal =
+                densityVolumeLocalToWorld.inverse;
+
+            compute.SetMatrix("densityVolumeLocalToWorld", densityVolumeLocalToWorld);
+            compute.SetMatrix("densityVolumeWorldToLocal", densityVolumeWorldToLocal);
+
+            // Foam settings
+            float fadeInT = (spawnRateFadeInTime <= 0) ? 1 : Mathf.Clamp01((simTimer - spawnRateFadeStartTime) / spawnRateFadeInTime);
 			compute.SetVector("trappedAirParams", new Vector3(trappedAirSpawnRate * fadeInT * fadeInT, trappedAirVelocityMinMax.x, trappedAirVelocityMinMax.y));
 			compute.SetVector("kineticEnergyParams", foamKineticEnergyMinMax);
 			compute.SetFloat("bubbleBuoyancy", bubbleBuoyancy);
