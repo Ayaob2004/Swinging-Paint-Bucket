@@ -1,11 +1,9 @@
-using System;
 using UnityEngine;
 
 /// <summary>
 /// Owns all bucket-side state: initial conditions, Inspector launch/reset commands,
 /// rope torsion, handle-axis hinge motion, pitch, roll and final Quaternion composition.
 /// </summary>
-[DefaultExecutionOrder(100)]
 [DisallowMultipleComponent]
 public sealed class BucketMotionController : MonoBehaviour
 {
@@ -91,8 +89,6 @@ public sealed class BucketMotionController : MonoBehaviour
     private float _rollAngle;
     private float _rollAngularVelocity;
 
-    public event Action SimulationReset;
-
     public bool IsSimulationRunning => _simulationRunning;
     public float CurrentTwistAngle => _twistAngle;
     public float CurrentHingeAngle => _hingeAngle;
@@ -104,14 +100,13 @@ public sealed class BucketMotionController : MonoBehaviour
         CaptureBasePose();
     }
 
-    private void Start()
+    /// <summary>
+    /// Advances bucket-side rotational physics by one externally controlled simulation step.
+    /// RopeVerlet3D must be advanced first for the same step.
+    /// </summary>
+    public void SimulateStep(float deltaTime)
     {
-        ResetToInitialState();
-    }
-
-    private void FixedUpdate()
-    {
-        if (!_simulationRunning || !HasRequiredReferences())
+        if (!_simulationRunning || !HasRequiredReferences() || deltaTime <= 0f)
             return;
 
         Vector3 ropeDirection = GetSafeRopeDirection();
@@ -121,15 +116,24 @@ public sealed class BucketMotionController : MonoBehaviour
         // center of mass can be used to calculate physical torques for this step.
         ApplyPose(ropeDirection);
 
-        float dt = Time.fixedDeltaTime;
-        UpdateTwist(dt);
-        UpdateJointMotion(dt);
+        UpdateTwist(deltaTime);
+        UpdateJointMotion(deltaTime);
 
         // Twist shortening is sent to the rope as one source of truth.
         _rope.SetLengthRatio(GetCurrentRopeLengthRatio());
 
         ropeDirection = GetSafeRopeDirection();
         ApplyPose(ropeDirection);
+    }
+
+    /// <summary>
+    /// Captures the authored pose once and prepares the initial paused state.
+    /// SimulationCoordinator calls this during scene initialization.
+    /// </summary>
+    public void InitializeState()
+    {
+        CaptureBasePose();
+        ResetToInitialState();
     }
 
     public void ResetToInitialState()
@@ -166,10 +170,9 @@ public sealed class BucketMotionController : MonoBehaviour
         _lastEndpointVelocity = Vector3.zero;
 
         ApplyPose(initialDirection);
-        SimulationReset?.Invoke();
     }
 
-    public void ApplyInitialMotion()
+    public void ApplyInitialMotion(float simulationStepDeltaTime)
     {
         if (_simulationRunning || !HasRequiredReferences())
             return;
@@ -184,16 +187,31 @@ public sealed class BucketMotionController : MonoBehaviour
         _rollAngularVelocity = _initialRollAngularVelocity;
 
         _rope.SetPayloadMass(_bucketMass);
-        _rope.SetEndpointVelocity(linearVelocity);
+        _rope.SetEndpointVelocity(linearVelocity, simulationStepDeltaTime);
         _rope.BeginSimulation();
         _lastEndpointVelocity = linearVelocity;
         _simulationRunning = true;
     }
 
-    public void ResetAndApplyInitialMotion()
+    /// <summary>
+    /// Compatibility overload. SimulationCoordinator should pass its exact substep duration.
+    /// </summary>
+    public void ApplyInitialMotion()
+    {
+        ApplyInitialMotion(Time.fixedDeltaTime);
+    }
+
+    public void StopSimulation()
+    {
+        _simulationRunning = false;
+        if (_rope != null)
+            _rope.StopSimulation();
+    }
+
+    public void ResetAndApplyInitialMotion(float simulationStepDeltaTime)
     {
         ResetToInitialState();
-        ApplyInitialMotion();
+        ApplyInitialMotion(simulationStepDeltaTime);
     }
 
     private void CaptureBasePose()

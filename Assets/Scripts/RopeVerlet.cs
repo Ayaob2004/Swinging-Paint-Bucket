@@ -62,12 +62,16 @@ public sealed class RopeVerlet3D : MonoBehaviour
         BuildParticlesIfNeeded();
     }
 
-    private void FixedUpdate()
+    /// <summary>
+    /// Advances the rope by one externally controlled simulation step.
+    /// SimulationCoordinator is the only caller in normal gameplay.
+    /// </summary>
+    public void SimulateStep(float deltaTime)
     {
-        if (!_isSimulating || _particles.Count < 2)
+        if (!_isSimulating || _particles.Count < 2 || deltaTime <= 0f)
             return;
 
-        SimulateParticles();
+        SimulateParticles(deltaTime);
 
         for (int iteration = 0; iteration < _constraintIterations; iteration++)
             SolveDistanceConstraints();
@@ -76,7 +80,7 @@ public sealed class RopeVerlet3D : MonoBehaviour
         if (_enableRopeCollision && _collisionMask.value != 0)
             ResolveRopeCollisions();
 
-        _lastEndpointVelocity = GetParticleVelocity(_particles.Count - 1);
+        _lastEndpointVelocity = GetParticleVelocity(_particles.Count - 1, deltaTime);
     }
 
     public void ResetSimulation(Vector3 endpointPosition)
@@ -116,16 +120,24 @@ public sealed class RopeVerlet3D : MonoBehaviour
         }
     }
 
-    public void SetEndpointVelocity(Vector3 velocity)
+    public void SetEndpointVelocity(Vector3 velocity, float deltaTime)
     {
         if (_particles.Count == 0)
             return;
 
         int lastIndex = _particles.Count - 1;
         RopeParticle endpoint = _particles[lastIndex];
-        endpoint.PreviousPosition = endpoint.CurrentPosition - velocity * Time.fixedDeltaTime;
+        endpoint.PreviousPosition = endpoint.CurrentPosition - velocity * Mathf.Max(deltaTime, 0.000001f);
         _particles[lastIndex] = endpoint;
         _lastEndpointVelocity = velocity;
+    }
+
+    /// <summary>
+    /// Compatibility overload for any existing caller outside SimulationCoordinator.
+    /// </summary>
+    public void SetEndpointVelocity(Vector3 velocity)
+    {
+        SetEndpointVelocity(velocity, Time.fixedDeltaTime);
     }
 
     public void SetPayloadMass(float payloadMass)
@@ -167,9 +179,9 @@ public sealed class RopeVerlet3D : MonoBehaviour
         _lastEndpointVelocity = Vector3.zero;
     }
 
-    private void SimulateParticles()
+    private void SimulateParticles(float deltaTime)
     {
-        float deltaTimeSquared = Time.fixedDeltaTime * Time.fixedDeltaTime;
+        float deltaTimeSquared = deltaTime * deltaTime;
 
         for (int i = 1; i < _particles.Count; i++)
         {
@@ -271,13 +283,13 @@ public sealed class RopeVerlet3D : MonoBehaviour
         return 1f / Mathf.Max(0.0001f, mass);
     }
 
-    private Vector3 GetParticleVelocity(int particleIndex)
+    private Vector3 GetParticleVelocity(int particleIndex, float deltaTime)
     {
-        if (particleIndex < 0 || particleIndex >= _particles.Count || Time.fixedDeltaTime <= 0f)
+        if (particleIndex < 0 || particleIndex >= _particles.Count || deltaTime <= 0f)
             return Vector3.zero;
 
         RopeParticle particle = _particles[particleIndex];
-        return (particle.CurrentPosition - particle.PreviousPosition) / Time.fixedDeltaTime;
+        return (particle.CurrentPosition - particle.PreviousPosition) / deltaTime;
     }
 
     private Vector3 GetAnchorPosition()

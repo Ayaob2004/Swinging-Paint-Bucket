@@ -19,6 +19,7 @@ namespace Seb.Fluid.Collision {
 
         readonly List<TriangleData> triangles = new();
         readonly List<ObjectData> objects = new();
+        readonly List<MeshCollisionObject> builtCollisionObjects = new();
         readonly List<string> objectNames = new();
 
         readonly List<GridCellData> gridCells = new();
@@ -76,6 +77,7 @@ namespace Seb.Fluid.Collision {
         void BuildCollisionData() {
             triangles.Clear();
             objects.Clear();
+            builtCollisionObjects.Clear();
             objectNames.Clear();
 
             gridCells.Clear();
@@ -124,6 +126,7 @@ namespace Seb.Fluid.Collision {
                     friction = obj.friction,
                     isDynamic = obj.isDynamic ? 1 : 0
                 });
+                builtCollisionObjects.Add(obj);
 
                 Vector3[] vertices = mesh.vertices;
                 int[] meshTriangles = mesh.triangles;
@@ -369,6 +372,11 @@ namespace Seb.Fluid.Collision {
             );
         }
 
+        /// <summary>
+        /// Advances each dynamic object's previous matrix to its last current matrix, then
+        /// uploads its newest transform. Call this after moving the bucket and before the
+        /// corresponding fluid substep.
+        /// </summary>
         public void UpdateDynamicObjects() {
             if (objectBuffer == null || objects.Count == 0)
                 return;
@@ -376,29 +384,57 @@ namespace Seb.Fluid.Collision {
             bool hasChanges = false;
 
             for (int i = 0; i < objects.Count; i++) {
-                if (i >= collisionObjects.Count)
-                    continue;
-
-                MeshCollisionObject collisionObject = collisionObjects[i];
+                MeshCollisionObject collisionObject = i < builtCollisionObjects.Count
+                    ? builtCollisionObjects[i]
+                    : null;
 
                 if (collisionObject == null || !collisionObject.isDynamic)
                     continue;
 
                 ObjectData objectData = objects[i];
-
                 objectData.previousLocalToWorld = objectData.localToWorld;
                 objectData.previousWorldToLocal = objectData.worldToLocal;
-
                 objectData.localToWorld = collisionObject.transform.localToWorldMatrix;
                 objectData.worldToLocal = collisionObject.transform.worldToLocalMatrix;
-
                 objects[i] = objectData;
                 hasChanges = true;
             }
 
-            if (hasChanges) {
+            if (hasChanges)
                 objectBuffer.SetData(objects);
+        }
+
+        /// <summary>
+        /// Makes the current and previous transforms identical. Use after reset or before
+        /// starting simulation so a teleport is never interpreted as collision velocity.
+        /// </summary>
+        public void SynchronizeDynamicObjects() {
+            if (objectBuffer == null || objects.Count == 0)
+                return;
+
+            bool hasChanges = false;
+
+            for (int i = 0; i < objects.Count; i++) {
+                MeshCollisionObject collisionObject = i < builtCollisionObjects.Count
+                    ? builtCollisionObjects[i]
+                    : null;
+
+                if (collisionObject == null || !collisionObject.isDynamic)
+                    continue;
+
+                Matrix4x4 localToWorld = collisionObject.transform.localToWorldMatrix;
+                Matrix4x4 worldToLocal = collisionObject.transform.worldToLocalMatrix;
+                ObjectData objectData = objects[i];
+                objectData.localToWorld = localToWorld;
+                objectData.worldToLocal = worldToLocal;
+                objectData.previousLocalToWorld = localToWorld;
+                objectData.previousWorldToLocal = worldToLocal;
+                objects[i] = objectData;
+                hasChanges = true;
             }
+
+            if (hasChanges)
+                objectBuffer.SetData(objects);
         }
 
         void OnDestroy() {

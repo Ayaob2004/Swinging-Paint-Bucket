@@ -45,10 +45,9 @@ namespace Seb.Fluid.Simulation
 		[Tooltip("Scale applied when splatting particle density into the 3D texture.")]
 		public float splatDensityScale = 1f;
 
-		[Header("Time Step")] public float normalTimeScale = 1;
-		public float slowTimeScale = 0.1f;
-		public float maxTimestepFPS = 60; // if time-step dips lower than this fps, simulation will run slower (set to 0 to disable)
-		public int iterationsPerFrame = 3;
+		[Header("External Simulation Control")]
+		[Tooltip("SimulationCoordinator owns the simulation timestep and the number of substeps.")]
+		[SerializeField, HideInInspector] private bool externallyStepped = true;
 
 		[Header("Simulation Settings")] public float gravity = -10;
 		public float smoothingRadius = 0.2f;
@@ -117,26 +116,29 @@ namespace Seb.Fluid.Simulation
 		SpatialHash spatialHash;
 
 		// State
-		bool isPaused;
-		bool pauseNextFrame;
+		bool isInitialized;
+		bool isSimulationRunning;
 		float smoothRadiusOld;
 		float simTimer;
-		bool inSlowMode;
 		Spawner3D.SpawnData spawnData;
 		Dictionary<ComputeBuffer, string> bufferNameLookup;
 		int densityMapFrameCounter;
 		Vector3Int cachedDensityMapSize;
 
-		void Start()
-		{
-			Debug.Log("Controls: Space = Play/Pause, Q = SlowMode, R = Reset");
-			isPaused = false;
+		public bool IsInitialized => isInitialized;
+		public bool IsSimulationRunning => isSimulationRunning;
 
-			Initialize();
-		}
-
-		void Initialize()
+		/// <summary>
+		/// Creates GPU resources once. SimulationCoordinator calls this after the bucket
+		/// has been placed in its initial paused pose.
+		/// </summary>
+		public void InitializeSimulation()
 		{
+			if (isInitialized)
+				return;
+
+			if (!ValidateReferences())
+				return;
 			ApplyPerformanceProfile();
 			ApplyMaterialPreset();
 
@@ -346,59 +348,89 @@ namespace Seb.Fluid.Simulation
 
 			UpdateSmoothingConstants();
 
-			// Run single frame of sim with deltaTime = 0 to initialize density texture
-			// (so that display can work even if paused at start)
-			if (renderToTex3D)
-			{
-				RunSimulationFrame(0, forceDensityUpdate: true);
-			}
-
+			isInitialized = true;
+			isSimulationRunning = false;
+			BakeDensityMap(forceDensityUpdate: true);
 			SimulationInitCompleted?.Invoke(this);
 		}
 
-		void Update()
+		/// <summary>
+		/// Starts or pauses the fluid without changing its particle data.
+		/// </summary>
+		public void SetSimulationRunning(bool running)
 		{
-			// Run simulation
-			if (!isPaused)
-			{
-				float maxDeltaTime = maxTimestepFPS > 0 ? 1 / maxTimestepFPS : float.PositiveInfinity; // If framerate dips too low, run the simulation slower than real-time
-				float dt = Mathf.Min(Time.deltaTime * ActiveTimeScale, maxDeltaTime);
-				RunSimulationFrame(dt);
-			}
-
-			if (pauseNextFrame)
-			{
-				isPaused = true;
-				pauseNextFrame = false;
-			}
-
-			HandleInput();
+			isSimulationRunning = isInitialized && running;
 		}
 
-		void RunSimulationFrame(float frameDeltaTime, bool forceDensityUpdate = false)
+		/// <summary>
+		/// Rebuilds fluid state at the current Spawner3D pose. All old particle state is discarded.
+		/// </summary>
+		public void ResetFluidAtCurrentSpawn()
 		{
-			float subStepDeltaTime = frameDeltaTime / iterationsPerFrame;
-			UpdateSettings(subStepDeltaTime, frameDeltaTime);
-
-			// Simulation sub-steps
-			for (int i = 0; i < iterationsPerFrame; i++)
+			if (!isInitialized)
 			{
-				simTimer += subStepDeltaTime;
-				RunSimulationStep();
+				InitializeSimulation();
+				return;
 			}
 
-			// Foam and spray particles
+			if (spawner == null)
+			{
+				Debug.LogError("FluidSim needs a Spawner3D reference to reset the fluid.", this);
+				return;
+			}
+
+			SetSimulationRunning(false);
+			Spawner3D.SpawnData newSpawnData = spawner.GetSpawnData();
+			if (newSpawnData.points == null || newSpawnData.points.Length == 0)
+			{
+				Debug.LogError("Spawner3D returned no particles. Fluid reset was cancelled.", this);
+				return;
+			}
+
+			if (positionBuffer == null || newSpawnData.points.Length != positionBuffer.count)
+			{
+				ReleaseFluidResources();
+				isInitialized = false;
+				InitializeSimulation();
+				return;
+			}
+
+			spawnData = newSpawnData;
+			SetInitialBufferData(spawnData);
+			densityMapFrameCounter = 0;
+			BakeDensityMap(forceDensityUpdate: true);
+		}
+
+		/// <summary>
+		/// Advances exactly one simulation substep. It is intentionally not called from Update.
+		/// </summary>
+		public void SimulateSubstep(float deltaTime)
+		{
+			if (!isInitialized || !isSimulationRunning || deltaTime <= 0f)
+				return;
+
+			UpdateSettings(deltaTime, deltaTime);
+			simTimer += deltaTime;
+			RunSimulationStep();
+
 			if (foamActive)
 			{
 				Dispatch(compute, maxFoamParticleCount, kernelIndex: foamUpdateKernel);
-				Dispatch(compute, maxFoamParticleCount, kernelIndex: foamReorderCopyBackKernel);
-			}
+                Dispatch(compute, maxFoamParticleCount, kernelIndex: foamReorderCopyBackKernel);
+            }
+		}
 
-			// 3D density map
-			if (renderToTex3D && (forceDensityUpdate || ShouldUpdateDensityMap()))
-			{
+		/// <summary>
+		/// Updates the volumetric density texture once after the externally controlled substeps.
+		/// </summary>
+		public void BakeDensityMap(bool forceDensityUpdate = false)
+		{
+			if (!isInitialized || !renderToTex3D)
+				return;
+
+			UpdateSettings(0f, 0f);
+			if (forceDensityUpdate || ShouldUpdateDensityMap())
 				UpdateDensityMap();
-			}
 		}
 
 		bool ShouldUpdateDensityMap()
@@ -485,9 +517,6 @@ namespace Seb.Fluid.Simulation
 			Vector3 simBoundsSize = transform.localScale;
 			Vector3 simBoundsCentre = transform.position;
 
-            if (meshCollisionBuilder != null) {
-                meshCollisionBuilder.UpdateDynamicObjects();
-            }
 
             compute.SetInt("collisionTriangleCount", meshCollisionBuilder != null ? meshCollisionBuilder.TriangleCount : 0);
             compute.SetInt("collisionObjectCount", meshCollisionBuilder != null ? meshCollisionBuilder.ObjectCount : 0);
@@ -539,46 +568,17 @@ namespace Seb.Fluid.Simulation
 			positionBuffer.SetData(spawnData.points);
 			predictedPositionsBuffer.SetData(spawnData.points);
 			velocityBuffer.SetData(spawnData.velocities);
-
+			densityBuffer.SetData(new float2[densityBuffer.count]);
+			sortTarget_positionBuffer.SetData(new float3[sortTarget_positionBuffer.count]);
+			sortTarget_predictedPositionsBuffer.SetData(new float3[sortTarget_predictedPositionsBuffer.count]);
+			sortTarget_velocityBuffer.SetData(new float3[sortTarget_velocityBuffer.count]);
 			foamBuffer.SetData(new FoamParticle[foamBuffer.count]);
-
+			foamSortTargetBuffer.SetData(new FoamParticle[foamSortTargetBuffer.count]);
 			debugBuffer.SetData(new float3[debugBuffer.count]);
 			foamCountBuffer.SetData(new uint[foamCountBuffer.count]);
-			simTimer = 0;
+			densityMapFrameCounter = 0;
+			simTimer = 0f;
 		}
-
-		void HandleInput()
-		{
-			if (Input.GetKeyDown(KeyCode.Space))
-			{
-				isPaused = !isPaused;
-			}
-
-			if (Input.GetKeyDown(KeyCode.RightArrow))
-			{
-				isPaused = false;
-				pauseNextFrame = true;
-			}
-
-			if (Input.GetKeyDown(KeyCode.R))
-			{
-				pauseNextFrame = true;
-				SetInitialBufferData(spawnData);
-				// Run single frame of sim with deltaTime = 0 to initialize density texture
-				// (so that display can work even if paused at start)
-				if (renderToTex3D)
-				{
-					RunSimulationFrame(0, forceDensityUpdate: true);
-				}
-			}
-
-			if (Input.GetKeyDown(KeyCode.Q))
-			{
-				inSlowMode = !inSlowMode;
-			}
-		}
-
-		private float ActiveTimeScale => inSlowMode ? slowTimeScale : normalTimeScale;
 
 		public void ApplyPerformanceProfile()
 		{
@@ -588,24 +588,18 @@ namespace Seb.Fluid.Simulation
 					densityBakeMode = DensityBakeMode.FastParticleSplat;
 					densityTextureRes = 96;
 					densityTextureUpdateInterval = 1;
-					iterationsPerFrame = 2;
-					maxTimestepFPS = 60;
 					splatDensityScale = 1.15f;
 					break;
 				case SimulationPerformanceProfile.Balanced:
 					densityBakeMode = DensityBakeMode.FastParticleSplat;
 					densityTextureRes = 128;
 					densityTextureUpdateInterval = 1;
-					iterationsPerFrame = 3;
-					maxTimestepFPS = 60;
 					splatDensityScale = 1f;
 					break;
 				case SimulationPerformanceProfile.HighQuality:
 					densityBakeMode = DensityBakeMode.AccurateSPHPerVoxel;
 					densityTextureRes = 150;
 					densityTextureUpdateInterval = 1;
-					iterationsPerFrame = 3;
-					maxTimestepFPS = 0;
 					splatDensityScale = 1f;
 					break;
 			}
@@ -657,18 +651,68 @@ namespace Seb.Fluid.Simulation
 				ApplyMaterialPreset();
 		}
 
-        void OnDestroy() {
-            foreach (var kvp in bufferNameLookup) {
-                if (meshCollisionBuilder != null &&
-                    (kvp.Key == meshCollisionBuilder.TriangleBuffer ||
-                     kvp.Key == meshCollisionBuilder.ObjectBuffer)) {
-                    continue;
-                }
-
-                Release(kvp.Key);
+        bool ValidateReferences()
+        {
+            if (compute == null)
+            {
+                Debug.LogError("FluidSim needs a ComputeShader reference.", this);
+                return false;
             }
 
-            spatialHash.Release();
+            if (spawner == null)
+            {
+                Debug.LogError("FluidSim needs a Spawner3D reference.", this);
+                return false;
+            }
+
+            return true;
+        }
+
+        void ReleaseFluidResources()
+        {
+            bool hadFluidResources = positionBuffer != null;
+
+            Release(positionBuffer);
+            Release(predictedPositionsBuffer);
+            Release(velocityBuffer);
+            Release(densityBuffer);
+            Release(foamBuffer);
+            Release(foamSortTargetBuffer);
+            Release(foamCountBuffer);
+            Release(debugBuffer);
+            Release(sortTarget_positionBuffer);
+            Release(sortTarget_predictedPositionsBuffer);
+            Release(sortTarget_velocityBuffer);
+
+            positionBuffer = null;
+            predictedPositionsBuffer = null;
+            velocityBuffer = null;
+            densityBuffer = null;
+            foamBuffer = null;
+            foamSortTargetBuffer = null;
+            foamCountBuffer = null;
+            debugBuffer = null;
+            sortTarget_positionBuffer = null;
+            sortTarget_predictedPositionsBuffer = null;
+            sortTarget_velocityBuffer = null;
+
+            if (hadFluidResources)
+                spatialHash.Release();
+
+            bufferNameLookup?.Clear();
+            bufferNameLookup = null;
+        }
+
+        void OnDestroy()
+        {
+            ReleaseFluidResources();
+
+            if (DensityMap != null)
+            {
+                DensityMap.Release();
+                Destroy(DensityMap);
+                DensityMap = null;
+            }
         }
 
 
