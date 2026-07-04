@@ -110,6 +110,7 @@ const float viscosityStrength;
 const float edgeForce;
 const float edgeForceDst;
 const float3 boundsSize;
+float3 densityBoundsSize;
 
 const float4x4 localToWorld;
 const float4x4 worldToLocal;
@@ -871,7 +872,7 @@ void UpdateDensityTexture(uint3 id : SV_DispatchThreadID)
 
     // كل voxel في DensityMap له موضع محلي بالنسبة إلى الـ Simulation
     float3 texturePos = id / (densityMapSize - 1.0);
-    float3 localVoxelPos = (texturePos - 0.5) * boundsSize;
+    float3 localVoxelPos = (texturePos - 0.5) * densityBoundsSize;
 
     // نحوله إلى World Space لأن Positions الخاصة بالجزيئات موجودة في World Space
     float3 worldVoxelPos =
@@ -882,12 +883,12 @@ void UpdateDensityTexture(uint3 id : SV_DispatchThreadID)
 
 float3 VolumeCoordToLocalPos(float3 volumeCoord01)
 {
-    return (volumeCoord01 - 0.5) * boundsSize;
+    return (volumeCoord01 - 0.5) * densityBoundsSize;
 }
 
 float3 LocalPosToVolumeCoord(float3 localPos)
 {
-    return localPos / boundsSize + 0.5;
+    return localPos / densityBoundsSize + 0.5;
 }
 
 [numthreads(8, 8, 8)]
@@ -918,7 +919,7 @@ void SplatDensityFromParticles(uint3 id : SV_DispatchThreadID)
     float3 volumeCoord = LocalPosToVolumeCoord(localParticlePos);
 
     float3 voxelLocalSize =
-    boundsSize / max(1.0, (float3) (densityMapSize - 1));
+    densityBoundsSize / max(1.0, (float3) (densityMapSize - 1));
 
     float minVoxelSize =
     min(voxelLocalSize.x, min(voxelLocalSize.y, voxelLocalSize.z));

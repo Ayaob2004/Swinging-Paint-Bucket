@@ -69,8 +69,6 @@ Shader "Fluid/Raymarching"
             float4x4 densityVolumeLocalToWorld;
             float4x4 densityVolumeWorldToLocal;
 
-            const float3 floorPos;
-            const float3 floorSize;
             
             static const float3 cubeCol = float3(0.95, 0.3, 0.35);
             static const float iorAir = 1;
@@ -524,37 +522,10 @@ Shader "Fluid/Raymarching"
                 return lerp(colGround, skyGradient, groundToSkyT) + sun * (groundToSkyT >= 1);
             }
 
+            // The real Drawing Surface is rendered by Unity scene geometry.
+            // This raymarch shader no longer owns a synthetic floor volume.
             float3 SampleEnvironment(float3 pos, float3 dir)
             {
-                HitInfo floorInfo = RayBox(pos, dir, floorPos, floorSize);
-                // HitInfo bucketInfo = RayBucketWithMatrix(pos, dir, cubeLocalToWorld, cubeWorldToLocal);
-
-                // if (bucketInfo.didHit && bucketInfo.dst < floorInfo.dst)
-                // {
-                //     return saturate(dot(bucketInfo.normal, dirToSun) * 0.5 + 0.5) * cubeCol;
-                // }
-                if (floorInfo.didHit)
-                {
-                    // Choose tileCol based on quadrant
-                    float3 tileCol = floorInfo.hitPoint.x < 0 ? tileCol1 : tileCol2;
-                    if (floorInfo.hitPoint.z < 0) tileCol = floorInfo.hitPoint.x < 0 ? tileCol3 : tileCol4;
-
-                    // If tile is a dark tile, then darken it
-                    int2 tileCoord = floor(floorInfo.hitPoint.xz * tileScale);
-                    bool isDarkTile = Modulo(tileCoord.x, 2) == Modulo(tileCoord.y, 2);
-                    tileCol = TweakHSV(tileCol, float3(0, 0, tileDarkOffset * isDarkTile));
-
-                    // Vary hue/sat/val randomly
-                    uint rngState = HashInt2(tileCoord);
-                    float3 randomVariation = RandomSNorm3(rngState) * tileColVariation * 0.1;
-                    tileCol = TweakHSV(tileCol, randomVariation);
-
-                    float3 shadowMap = Transmittance(CalculateDensityAlongRay(floorInfo.hitPoint, _WorldSpaceLightPos0, lightStepSize * 2) * 2);
-                    bool inShadow = false;
-                    if (inShadow) shadowMap *= 0.2;
-                    return tileCol * shadowMap;
-                }
-
                 return SampleSky(dir);
             }
 

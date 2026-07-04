@@ -146,7 +146,7 @@ MonoBehaviour:
   isDynamic: 1
   collisionThickness: 0.2
   collisionDamping: 0
-  friction: 0
+  friction: 0.303
 --- !u!33 &86664664 stripped
 MeshFilter:
   m_CorrespondingSourceObject: {fileID: 6358484763436348557, guid: 06dcae7365376e94d953860271867380, type: 3}
@@ -565,8 +565,8 @@ MonoBehaviour:
   densityOffset: 180
   numRefractions: 2
   extinctionCoefficients: {x: 14, y: 5, z: 4}
-  fluidColor: {r: 1, g: 0.047897536, b: 0, a: 1}
-  paintOpacity: 1
+  fluidColor: {r: 0, g: 0.106405616, b: 1, a: 1}
+  paintOpacity: 0.5
   densityMultiplier: 0.055
   stepSize: 0.03
   lightStepSize: 0.15
@@ -575,6 +575,7 @@ MonoBehaviour:
   environmentSettings:
     light: {fileID: 128587420}
   sim: {fileID: 984308215}
+  renderVolume: {fileID: 1063595159}
   shader: {fileID: 4800000, guid: 557ee3bc7bd1ca242a49f3816e6025b5, type: 3}
 --- !u!81 &811702639
 AudioListener:
@@ -679,7 +680,7 @@ Transform:
   serializedVersion: 2
   m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
   m_LocalPosition: {x: 0.025391005, y: -3.7411041, z: -0.0489172}
-  m_LocalScale: {x: 30, y: 30, z: 30}
+  m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 1454591640}
@@ -716,15 +717,17 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: f99a384512b94654fbeb7c06c43f81ba, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Seb.Fluid.Simulation.Spawner3D
+  bucketFillPoint: {fileID: 540877662}
   particleSpawnDensity: 600
   initialVel:
     x: 0
     y: 0
     z: 0
+  initialVelocitySpace: 0
   jitterStrength: 0
   showSpawnBounds: 1
   spawnRegions:
-  - centre: {x: 0, y: -20, z: 0}
+  - localCentre: {x: 0, y: 0, z: 0}
     size: 5
     debugDisplayCol: {r: 0, g: 0.32883978, b: 1, a: 1}
   debug_num_particles: 74088
@@ -748,10 +751,7 @@ MonoBehaviour:
   densityTextureUpdateInterval: 1
   predictionTimestep: 0.008333334
   splatDensityScale: 1.2
-  normalTimeScale: 1
-  slowTimeScale: 0.1
-  maxTimestepFPS: 60
-  iterationsPerFrame: 2
+  externallyStepped: 1
   gravity: -9.81
   smoothingRadius: 0.18
   targetDensity: 700
@@ -778,6 +778,7 @@ MonoBehaviour:
   compute: {fileID: 7200000, guid: 9443696acfd0ebe4fb503b56d952256c, type: 3}
   spawner: {fileID: 984308214}
   meshCollisionBuilder: {fileID: 984308213}
+  renderVolume: {fileID: 1063595159}
   DensityMap: {fileID: 0}
 --- !u!4 &1048438672 stripped
 Transform:
@@ -793,6 +794,7 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 1063595158}
+  - component: {fileID: 1063595159}
   m_Layer: 0
   m_Name: Fluid Render Volume
   m_TagString: Untagged
@@ -815,6 +817,28 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &1063595159
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1063595157}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: dbf990d16e0af194d8fb1b443e89fe38, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::DynamicFluidRenderVolume
+  _bucketCollisionObject: {fileID: 86664663}
+  _paintOutletRegion: {fileID: 86664662}
+  _drawingSurface: {fileID: 1953790154}
+  _maximumRelativeExitSpeed: 5
+  _maximumUpwardExitSpeed: 0
+  _safetyMargin: 0.5
+  _minimumWorldSize: {x: 6, y: 6, z: 6}
+  _maximumWorldSize: {x: 40, y: 40, z: 40}
+  _densityTextureResolution: {x: 96, y: 160, z: 96}
+  _drawGizmos: 1
 --- !u!1 &1068417476
 GameObject:
   m_ObjectHideFlags: 0
@@ -936,6 +960,9 @@ PrefabInstance:
     - targetCorrespondingSourceObject: {fileID: 919132149155446097, guid: dc9dbe75a5b737444898b9bea88ac0ad, type: 3}
       insertIndex: -1
       addedObject: {fileID: 1953790149}
+    - targetCorrespondingSourceObject: {fileID: 919132149155446097, guid: dc9dbe75a5b737444898b9bea88ac0ad, type: 3}
+      insertIndex: -1
+      addedObject: {fileID: 1953790154}
   m_SourcePrefab: {fileID: 100100000, guid: dc9dbe75a5b737444898b9bea88ac0ad, type: 3}
 --- !u!1 &1454591639
 GameObject:
@@ -983,7 +1010,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: 06dcae7365376e94d953860271867380, type: 3}
       propertyPath: m_LocalPosition.y
-      value: 5
+      value: 0
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: 06dcae7365376e94d953860271867380, type: 3}
       propertyPath: m_LocalPosition.z
@@ -1069,6 +1096,20 @@ MeshFilter:
   m_CorrespondingSourceObject: {fileID: -5754084199372789682, guid: dc9dbe75a5b737444898b9bea88ac0ad, type: 3}
   m_PrefabInstance: {fileID: 1366700761}
   m_PrefabAsset: {fileID: 0}
+--- !u!114 &1953790154
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1953790148}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e916be3feebb741429d7e33dfc5d34ce, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::DrawingSurface
+  _collisionObject: {fileID: 1953790149}
+  _usePositiveLocalYFace: 1
 --- !u!1 &2036056290
 GameObject:
   m_ObjectHideFlags: 0
@@ -1078,6 +1119,7 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 2036056291}
+  - component: {fileID: 2036056292}
   m_Layer: 0
   m_Name: Simulation Controller
   m_TagString: Untagged
@@ -1100,6 +1142,24 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &2036056292
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2036056290}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 8699b64aa9fe484478adbaef5674fee8, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::SimulationCoordinator
+  _rope: {fileID: 310981069}
+  _bucketMotion: {fileID: 311801211}
+  _fluidSim: {fileID: 984308215}
+  _meshCollisionBuilder: {fileID: 984308213}
+  _renderVolume: {fileID: 1063595159}
+  _fluidSubstepsPerFixedStep: 4
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0

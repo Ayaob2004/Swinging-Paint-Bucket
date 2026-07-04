@@ -15,6 +15,7 @@ public sealed class SimulationCoordinator : MonoBehaviour
     [SerializeField] private BucketMotionController _bucketMotion;
     [SerializeField] private FluidSim _fluidSim;
     [SerializeField] private MeshCollisionBuilder _meshCollisionBuilder;
+    [SerializeField] private DynamicFluidRenderVolume _renderVolume;
 
     [Header("Fixed-Step Synchronization")]
     [SerializeField, Min(1)] private int _fluidSubstepsPerFixedStep = 2;
@@ -50,6 +51,7 @@ public sealed class SimulationCoordinator : MonoBehaviour
         }
 
         // Density baking is rendering work. It is done once after all physics substeps.
+        _renderVolume.UpdateBounds(_fluidSim.gravity);
         _fluidSim.BakeDensityMap();
     }
 
@@ -62,12 +64,14 @@ public sealed class SimulationCoordinator : MonoBehaviour
         if (!HasRequiredReferences())
         {
             Debug.LogError(
-                "SimulationCoordinator needs RopeVerlet3D, BucketMotionController, FluidSim and MeshCollisionBuilder references.",
+                "SimulationCoordinator needs RopeVerlet3D, BucketMotionController, FluidSim, MeshCollisionBuilder and DynamicFluidRenderVolume references.",
                 this);
             return;
         }
 
         _bucketMotion.InitializeState();
+        _renderVolume.ResetHistory();
+        _renderVolume.UpdateBounds(_fluidSim.gravity);
         _fluidSim.InitializeSimulation();
         if (!_fluidSim.IsInitialized)
             return;
@@ -94,8 +98,11 @@ public sealed class SimulationCoordinator : MonoBehaviour
 
         // Reset is a teleport, never a moving collision. Synchronize before respawning fluid.
         _meshCollisionBuilder.SynchronizeDynamicObjects();
+        _renderVolume.ResetHistory();
+        _renderVolume.UpdateBounds(_fluidSim.gravity);
         _fluidSim.ResetFluidAtCurrentSpawn();
         _meshCollisionBuilder.SynchronizeDynamicObjects();
+        _renderVolume.UpdateBounds(_fluidSim.gravity);
         _fluidSim.BakeDensityMap(forceDensityUpdate: true);
     }
 
@@ -132,6 +139,7 @@ public sealed class SimulationCoordinator : MonoBehaviour
         _bucketMotion.StopSimulation();
         _fluidSim.SetSimulationRunning(false);
         _meshCollisionBuilder.SynchronizeDynamicObjects();
+        _renderVolume.UpdateBounds(_fluidSim.gravity);
         _fluidSim.BakeDensityMap(forceDensityUpdate: true);
     }
 
@@ -151,12 +159,18 @@ public sealed class SimulationCoordinator : MonoBehaviour
 
         if (_meshCollisionBuilder == null)
             _meshCollisionBuilder = FindAnyObjectByType<MeshCollisionBuilder>();
+
+        if (_renderVolume == null)
+            _renderVolume = FindAnyObjectByType<DynamicFluidRenderVolume>();
+
+        if (_fluidSim != null && _fluidSim.renderVolume == null)
+            _fluidSim.renderVolume = _renderVolume;
     }
 
     private bool HasRequiredReferences()
     {
         return _rope != null && _bucketMotion != null &&
-               _fluidSim != null && _meshCollisionBuilder != null;
+               _fluidSim != null && _meshCollisionBuilder != null && _renderVolume != null;
     }
 
     private void OnValidate()

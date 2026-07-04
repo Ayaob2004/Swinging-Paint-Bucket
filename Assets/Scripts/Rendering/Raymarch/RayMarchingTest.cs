@@ -32,14 +32,17 @@ namespace Seb.Fluid.Rendering {
 
         [Header("References")]
         public FluidSim sim;
-        // public Transform cubeTransform;
+        public DynamicFluidRenderVolume renderVolume;
         public Shader shader;
 
         Material raymarchMat;
 
         void Start() {
             raymarchMat = new Material(shader);
-            Camera.main.depthTextureMode = DepthTextureMode.Depth;
+            if (Camera.main != null)
+                Camera.main.depthTextureMode = DepthTextureMode.Depth;
+            if (renderVolume == null)
+                renderVolume = FindAnyObjectByType<DynamicFluidRenderVolume>();
             ApplyRenderQualityProfile();
             if (sim != null)
                 sim.SimulationInitCompleted += _ => ApplyRenderQualityProfile();
@@ -98,7 +101,7 @@ namespace Seb.Fluid.Rendering {
 
         [ImageEffectOpaque]
         void OnRenderImage(RenderTexture src, RenderTexture target) {
-            if (sim.DensityMap != null) {
+            if (sim != null && renderVolume != null && sim.DensityMap != null) {
                 SetShaderParams();
                 Graphics.Blit(src, target, raymarchMat);
             } else {
@@ -109,16 +112,9 @@ namespace Seb.Fluid.Rendering {
         void SetShaderParams() {
             SetEnvironmentParams(raymarchMat, environmentSettings);
             raymarchMat.SetTexture("DensityMap", sim.DensityMap);
-            raymarchMat.SetVector("boundsSize", sim.Scale);
-
-            Matrix4x4 densityVolumeLocalToWorld =
-                Matrix4x4.TRS(sim.transform.position, sim.transform.rotation, Vector3.one);
-
-            Matrix4x4 densityVolumeWorldToLocal =
-                densityVolumeLocalToWorld.inverse;
-
-            raymarchMat.SetMatrix("densityVolumeLocalToWorld", densityVolumeLocalToWorld);
-            raymarchMat.SetMatrix("densityVolumeWorldToLocal", densityVolumeWorldToLocal);
+            raymarchMat.SetVector("boundsSize", renderVolume.WorldSize);
+            raymarchMat.SetMatrix("densityVolumeLocalToWorld", renderVolume.LocalToWorldMatrix);
+            raymarchMat.SetMatrix("densityVolumeWorldToLocal", renderVolume.WorldToLocalMatrix);
 
             raymarchMat.SetFloat("volumeValueOffset", densityOffset);
             raymarchMat.SetVector("testParams", testParams);
@@ -130,13 +126,7 @@ namespace Seb.Fluid.Rendering {
             raymarchMat.SetVector("extinctionCoeff", extinctionCoefficients);
             raymarchMat.SetColor("fluidColor", fluidColor);
             raymarchMat.SetFloat("paintOpacity", paintOpacity);
-            // raymarchMat.SetMatrix("cubeLocalToWorld", Matrix4x4.TRS(cubeTransform.position, cubeTransform.rotation, cubeTransform.localScale / 2));
-            // raymarchMat.SetMatrix("cubeWorldToLocal", Matrix4x4.TRS(cubeTransform.position, cubeTransform.rotation, cubeTransform.localScale / 2).inverse);
 
-            Vector3 floorSize = new Vector3(30, 0.05f, 30);
-            float floorHeight = -sim.Scale.y / 2 + sim.transform.position.y - floorSize.y / 2;
-            raymarchMat.SetVector("floorPos", new Vector3(0, floorHeight, 0));
-            raymarchMat.SetVector("floorSize", floorSize);
         }
 
         public static void SetEnvironmentParams(Material mat, EnvironmentSettings environmentSettings) {

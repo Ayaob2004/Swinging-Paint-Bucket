@@ -80,9 +80,11 @@ namespace Seb.Fluid.Simulation
 		[Header("References")] public ComputeShader compute;
 		public Spawner3D spawner;
         public MeshCollisionBuilder meshCollisionBuilder;
+        [Tooltip("World-space density volume used only for baking and raymarching. It never parents or moves particles.")]
+        public DynamicFluidRenderVolume renderVolume;
 
         [HideInInspector] public RenderTexture DensityMap;
-		public Vector3 Scale => transform.localScale;
+		public Vector3 Scale => renderVolume != null ? renderVolume.WorldSize : transform.localScale;
 
 		// Buffers
 		public ComputeBuffer foamBuffer { get; private set; }
@@ -416,8 +418,8 @@ namespace Seb.Fluid.Simulation
 			if (foamActive)
 			{
 				Dispatch(compute, maxFoamParticleCount, kernelIndex: foamUpdateKernel);
-                Dispatch(compute, maxFoamParticleCount, kernelIndex: foamReorderCopyBackKernel);
-            }
+				Dispatch(compute, maxFoamParticleCount, kernelIndex: foamReorderCopyBackKernel);
+			}
 		}
 
 		/// <summary>
@@ -468,12 +470,15 @@ namespace Seb.Fluid.Simulation
 
 		void EnsureDensityMapAllocated()
 		{
-			float maxAxis = Mathf.Max(transform.localScale.x, transform.localScale.y, transform.localScale.z);
-			int w = Mathf.Max(8, Mathf.RoundToInt(transform.localScale.x / maxAxis * densityTextureRes));
-			int h = Mathf.Max(8, Mathf.RoundToInt(transform.localScale.y / maxAxis * densityTextureRes));
-			int d = Mathf.Max(8, Mathf.RoundToInt(transform.localScale.z / maxAxis * densityTextureRes));
-			cachedDensityMapSize = new Vector3Int(w, h, d);
-			CreateRenderTexture3D(ref DensityMap, w, h, d, UnityEngine.Experimental.Rendering.GraphicsFormat.R16_SFloat, TextureWrapMode.Clamp);
+			Vector3Int desiredSize = renderVolume != null
+				? renderVolume.DensityTextureResolution
+				: new Vector3Int(Mathf.Max(8, densityTextureRes), Mathf.Max(8, densityTextureRes), Mathf.Max(8, densityTextureRes));
+
+			if (DensityMap != null && cachedDensityMapSize == desiredSize)
+				return;
+
+			cachedDensityMapSize = desiredSize;
+			CreateRenderTexture3D(ref DensityMap, desiredSize.x, desiredSize.y, desiredSize.z, UnityEngine.Experimental.Rendering.GraphicsFormat.R16_SFloat, TextureWrapMode.Clamp);
 		}
 
 		void RunSimulationStep()
@@ -514,8 +519,15 @@ namespace Seb.Fluid.Simulation
 				UpdateSmoothingConstants();
 			}
 
+			// Simulation bounds stay separate from the render volume. The legacy analytic
+			// fallback collision still uses this transform; normal operation uses mesh collisions.
 			Vector3 simBoundsSize = transform.localScale;
 			Vector3 simBoundsCentre = transform.position;
+			Vector3 densityBoundsSize = renderVolume != null ? renderVolume.WorldSize : transform.localScale;
+			Matrix4x4 densityVolumeLocalToWorld = renderVolume != null
+				? renderVolume.LocalToWorldMatrix
+				: Matrix4x4.TRS(transform.position, transform.rotation, Vector3.one);
+			Matrix4x4 densityVolumeWorldToLocal = densityVolumeLocalToWorld.inverse;
 
 
             compute.SetInt("collisionTriangleCount", meshCollisionBuilder != null ? meshCollisionBuilder.TriangleCount : 0);
@@ -543,12 +555,7 @@ namespace Seb.Fluid.Simulation
 			compute.SetMatrix("localToWorld", transform.localToWorldMatrix);
 			compute.SetMatrix("worldToLocal", transform.worldToLocalMatrix);
 
-            Matrix4x4 densityVolumeLocalToWorld =
-				Matrix4x4.TRS(transform.position, transform.rotation, Vector3.one);
-
-            Matrix4x4 densityVolumeWorldToLocal =
-                densityVolumeLocalToWorld.inverse;
-
+            compute.SetVector("densityBoundsSize", densityBoundsSize);
             compute.SetMatrix("densityVolumeLocalToWorld", densityVolumeLocalToWorld);
             compute.SetMatrix("densityVolumeWorldToLocal", densityVolumeWorldToLocal);
 
@@ -645,6 +652,9 @@ namespace Seb.Fluid.Simulation
 
 		void OnValidate()
 		{
+			if (renderVolume == null)
+				renderVolume = FindAnyObjectByType<DynamicFluidRenderVolume>();
+
 			if (performanceProfile != SimulationPerformanceProfile.Custom)
 				ApplyPerformanceProfile();
 			if (materialPreset != FluidMaterialPreset.Custom)
