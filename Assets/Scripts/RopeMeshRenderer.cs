@@ -1,93 +1,81 @@
 using UnityEngine;
 
+/// <summary>
+/// Procedural mesh renderer for RopeVerlet3D. Rendering is fully separate from simulation.
+/// </summary>
 [RequireComponent(typeof(MeshFilter))]
 [RequireComponent(typeof(MeshRenderer))]
-public class RopeMeshRenderer : MonoBehaviour {
+[DisallowMultipleComponent]
+public sealed class RopeMeshRenderer : MonoBehaviour
+{
     [SerializeField] private RopeVerlet3D _rope;
+    [SerializeField] private BucketMotionController _bucketMotion;
 
     [Header("Mesh Settings")]
-    [SerializeField] private float _ropeRadius = 0.05f;
-    [SerializeField] private int _radialSegments = 8;
-
-    [Header("Twist Visual")]
-    [SerializeField] private float _twistTurns = 3f;
-    [SerializeField] private float _twistSpeed = 0f;
-
-    [Header("Twist Visual From Physics")]
-    [SerializeField] private float _visualTwistMultplier = 0.5f;
+    [SerializeField, Min(0.001f)] private float _ropeRadius = 0.2f;
+    [SerializeField, Range(3, 32)] private int _radialSegments = 8;
+    [SerializeField, Min(0f)] private float _visualTwistMultiplier = 1f;
 
     private Mesh _mesh;
-
     private Vector3[] _vertices;
     private Vector2[] _uvs;
     private int[] _triangles;
+    private Vector3[] _ringTangents;
+    private Vector3[] _ringRights;
+    private Vector3[] _ringUps;
 
-    private void Awake() {
-        _mesh = new Mesh();
-        _mesh.name = "Procedural Rope Mesh";
-
-        GetComponent<MeshFilter>().mesh = _mesh;
+    private void Awake()
+    {
+        _mesh = new Mesh { name = "Procedural Rope Mesh" };
+        _mesh.MarkDynamic();
+        GetComponent<MeshFilter>().sharedMesh = _mesh;
 
         if (_rope == null)
             _rope = GetComponent<RopeVerlet3D>();
+
+        if (_bucketMotion == null)
+            _bucketMotion = FindFirstObjectByType<BucketMotionController>();
     }
 
-    private void LateUpdate() {
-        if (_rope == null) return;
-        if (_rope.RopeSegments == null) return;
-        if (_rope.RopeSegments.Count < 2) return;
+    private void LateUpdate()
+    {
+        if (_rope == null || _rope.RopeParticles == null || _rope.RopeParticles.Count < 2)
+            return;
 
         BuildMesh();
     }
 
-    private void BuildMesh() {
-        int ringCount = _rope.RopeSegments.Count;
+    private void BuildMesh()
+    {
+        int ringCount = _rope.RopeParticles.Count;
         int vertexCount = ringCount * _radialSegments;
 
-        if (_vertices == null || _vertices.Length != vertexCount) {
-            _vertices = new Vector3[vertexCount];
-            _uvs = new Vector2[vertexCount];
-            _triangles = BuildTriangles(ringCount);
-        }
+        EnsureBuffers(ringCount, vertexCount);
+        BuildTransportFrames(ringCount);
 
-        for (int i = 0; i < ringCount; i++) {
-            Vector3 center = _rope.RopeSegments[i].CurrentPosition;
+        float totalTwistDegrees = _bucketMotion != null
+            ? _bucketMotion.CurrentTwistAngle * _visualTwistMultiplier
+            : 0f;
 
-            Vector3 forward;
+        for (int ringIndex = 0; ringIndex < ringCount; ringIndex++)
+        {
+            Vector3 center = _rope.RopeParticles[ringIndex].CurrentPosition;
+            float twistRadians = (ringIndex / (float)(ringCount - 1)) * totalTwistDegrees * Mathf.Deg2Rad;
 
-            if (i < ringCount - 1)
-                forward = (_rope.RopeSegments[i + 1].CurrentPosition - center).normalized;
-            else
-                forward = (center - _rope.RopeSegments[i - 1].CurrentPosition).normalized;
+            for (int radialIndex = 0; radialIndex < _radialSegments; radialIndex++)
+            {
+                float baseAngle = radialIndex / (float)_radialSegments * Mathf.PI * 2f;
+                float angle = baseAngle + twistRadians;
 
-            Vector3 right = Vector3.Cross(forward, Vector3.up).normalized;
-
-            if (right == Vector3.zero)
-                right = Vector3.Cross(forward, Vector3.right).normalized;
-
-            Vector3 up = Vector3.Cross(right, forward).normalized;
-
-            for (int j = 0; j < _radialSegments; j++) {
-                float baseAngle = (j / (float)_radialSegments) * Mathf.PI * 2f;
-
-                float physicsTwistTurns = _rope.TwistAmount * _visualTwistMultplier;
-
-                float twistAngle = (i / (float)(ringCount - 1)) * physicsTwistTurns * Mathf.PI * 2f;
-
-                twistAngle += Time.time * _twistSpeed;
-
-
-                float angle = baseAngle + twistAngle;
                 Vector3 offset =
-                    Mathf.Cos(angle) * right * _ropeRadius +
-                    Mathf.Sin(angle) * up * _ropeRadius;
+                    Mathf.Cos(angle) * _ringRights[ringIndex] * _ropeRadius +
+                    Mathf.Sin(angle) * _ringUps[ringIndex] * _ropeRadius;
 
-                _vertices[i * _radialSegments + j] = center + offset;
-
-                float u = j / (float)_radialSegments;
-                float v = i / (float)(ringCount - 1);
-
-                _uvs[i * _radialSegments + j] = new Vector2(u, v);
+                int vertexIndex = ringIndex * _radialSegments + radialIndex;
+                _vertices[vertexIndex] = transform.InverseTransformPoint(center + offset);
+                _uvs[vertexIndex] = new Vector2(
+                    radialIndex / (float)_radialSegments,
+                    ringIndex / (float)(ringCount - 1));
             }
         }
 
@@ -96,21 +84,77 @@ public class RopeMeshRenderer : MonoBehaviour {
         _mesh.triangles = _triangles;
         _mesh.uv = _uvs;
         _mesh.RecalculateNormals();
+        _mesh.RecalculateBounds();
     }
 
-    private int[] BuildTriangles(int ringCount) {
+    private void EnsureBuffers(int ringCount, int vertexCount)
+    {
+        if (_vertices != null && _vertices.Length == vertexCount)
+            return;
+
+        _vertices = new Vector3[vertexCount];
+        _uvs = new Vector2[vertexCount];
+        _triangles = BuildTriangles(ringCount);
+        _ringTangents = new Vector3[ringCount];
+        _ringRights = new Vector3[ringCount];
+        _ringUps = new Vector3[ringCount];
+    }
+
+    private void BuildTransportFrames(int ringCount)
+    {
+        for (int i = 0; i < ringCount; i++)
+        {
+            Vector3 center = _rope.RopeParticles[i].CurrentPosition;
+            Vector3 tangent;
+
+            if (i == 0)
+                tangent = _rope.RopeParticles[1].CurrentPosition - center;
+            else if (i == ringCount - 1)
+                tangent = center - _rope.RopeParticles[i - 1].CurrentPosition;
+            else
+                tangent = _rope.RopeParticles[i + 1].CurrentPosition - _rope.RopeParticles[i - 1].CurrentPosition;
+
+            tangent = tangent.sqrMagnitude > 0.000001f ? tangent.normalized : Vector3.down;
+            _ringTangents[i] = tangent;
+
+            if (i == 0)
+            {
+                Vector3 reference = Mathf.Abs(Vector3.Dot(tangent, Vector3.up)) > 0.95f
+                    ? Vector3.right
+                    : Vector3.up;
+
+                _ringRights[i] = Vector3.Cross(reference, tangent).normalized;
+                _ringUps[i] = Vector3.Cross(tangent, _ringRights[i]).normalized;
+                continue;
+            }
+
+            Quaternion turn = Quaternion.FromToRotation(_ringTangents[i - 1], tangent);
+            Vector3 right = turn * _ringRights[i - 1];
+            right -= tangent * Vector3.Dot(right, tangent);
+
+            if (right.sqrMagnitude < 0.000001f)
+                right = Vector3.Cross(_ringUps[i - 1], tangent);
+
+            _ringRights[i] = right.normalized;
+            _ringUps[i] = Vector3.Cross(tangent, _ringRights[i]).normalized;
+        }
+    }
+
+    private int[] BuildTriangles(int ringCount)
+    {
         int quadCount = (ringCount - 1) * _radialSegments;
         int[] triangles = new int[quadCount * 6];
-
         int index = 0;
 
-        for (int i = 0; i < ringCount - 1; i++) {
-            for (int j = 0; j < _radialSegments; j++) {
-                int current = i * _radialSegments + j;
-                int next = i * _radialSegments + (j + 1) % _radialSegments;
-
-                int currentAbove = (i + 1) * _radialSegments + j;
-                int nextAbove = (i + 1) * _radialSegments + (j + 1) % _radialSegments;
+        for (int ringIndex = 0; ringIndex < ringCount - 1; ringIndex++)
+        {
+            for (int radialIndex = 0; radialIndex < _radialSegments; radialIndex++)
+            {
+                int nextRadialIndex = (radialIndex + 1) % _radialSegments;
+                int current = ringIndex * _radialSegments + radialIndex;
+                int next = ringIndex * _radialSegments + nextRadialIndex;
+                int currentAbove = (ringIndex + 1) * _radialSegments + radialIndex;
+                int nextAbove = (ringIndex + 1) * _radialSegments + nextRadialIndex;
 
                 triangles[index++] = current;
                 triangles[index++] = currentAbove;
@@ -123,5 +167,12 @@ public class RopeMeshRenderer : MonoBehaviour {
         }
 
         return triangles;
+    }
+
+    private void OnValidate()
+    {
+        _ropeRadius = Mathf.Max(0.001f, _ropeRadius);
+        _radialSegments = Mathf.Clamp(_radialSegments, 3, 32);
+        _visualTwistMultiplier = Mathf.Max(0f, _visualTwistMultiplier);
     }
 }

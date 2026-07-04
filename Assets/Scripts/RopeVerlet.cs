@@ -1,250 +1,308 @@
-using UnityEngine;
 using System.Collections.Generic;
-using Unity.Hierarchy;
+using UnityEngine;
 
-[RequireComponent(typeof(LineRenderer))]
-public class RopeVerlet3D : MonoBehaviour {
-    [Header("Rope")]
-    [SerializeField] private int _numOfRopeSegments = 50;
-    [SerializeField] private float _ropeSegmentLength = 0.225f;
+/// <summary>
+/// Verlet rope simulation. It owns rope particles, constraints and the payload endpoint.
+/// It intentionally does not own bucket rotation, twist, input, or rendering.
+/// </summary>
+[DisallowMultipleComponent]
+public sealed class RopeVerlet3D : MonoBehaviour
+{
+    [Header("Rope Topology")]
+    [SerializeField, Min(2)] private int _particleCount = 50;
+    [SerializeField, Min(0.01f)] private float _totalRopeLength = 14.7f;
+    [SerializeField, Min(0.0001f)] private float _ropeParticleMass = 0.05f;
 
     [Header("Anchor")]
     [SerializeField] private Transform _anchorPoint;
 
-    [Header("End Ball")]
-/*    [SerializeField] private Transform _endBall;*/
+    [Header("Linear Physics")]
+    [SerializeField] private Vector3 _gravityAcceleration = new Vector3(0f, -30f, 0f);
+    [SerializeField, Range(0.90f, 1f)] private float _linearDamping = 0.997f;
+    [SerializeField, Min(1)] private int _constraintIterations = 32;
 
-    [Header("Physics")]
-    [SerializeField] private Vector3 _gravityForce = new Vector3(0f, -50.0f, 0f);
-    [SerializeField] private float _dampingFactor = 0.995f;
-    [SerializeField] private float _bounceFactor = 0.3f;
-
-    [Header("Twist Physics")]
-    [SerializeField] private float _twistAmount = 10f;
-    [SerializeField] private float _maxTwistAmount = 10f;
-    [SerializeField] private float _twistShorteningFactor = 0.015f;
-    [SerializeField] private float _twistVelocity = 0f;
-    [SerializeField] private float _twistStiffness = 20f;
-    [SerializeField] private float _twistDamping = 2f;
-
-    [Header("Collision")]
+    [Header("Optional Rope Collision")]
+    [SerializeField] private bool _enableRopeCollision;
     [SerializeField] private LayerMask _collisionMask;
-    [SerializeField] private float _collisionRadius = 0.1f;
+    [SerializeField, Min(0.001f)] private float _collisionRadius = 0.1f;
+    [SerializeField, Range(0f, 1f)] private float _collisionBounce = 0.15f;
 
-    [Header("Constraints")]
-    [SerializeField] private int _numOfConstraintRuns = 80;
+    private readonly List<RopeParticle> _particles = new List<RopeParticle>();
+    private readonly Collider[] _collisionBuffer = new Collider[16];
 
-    [Header("Optimizations")]
-    [SerializeField] private int _collisionSegmentInterval = 2;
+    private float _payloadMass = 1f;
+    private float _lengthRatio = 1f;
+    private bool _isSimulating;
+    private Vector3 _lastEndpointVelocity;
 
-    private LineRenderer _lineRenderer;
-    private readonly List<RopeSegment> _ropeSegments = new List<RopeSegment>();
-    public IReadOnlyList<RopeSegment> RopeSegments => _ropeSegments;
-    public float TwistAmount => _twistAmount;
+    public IReadOnlyList<RopeParticle> RopeParticles => _particles;
+    public IReadOnlyList<RopeParticle> RopeSegments => _particles; // Compatibility for existing references.
+    public Transform AnchorPoint => _anchorPoint;
+    public bool IsSimulating => _isSimulating;
+    public float BaseRopeLength => _totalRopeLength;
+    public float EffectiveRopeLength => _totalRopeLength * _lengthRatio;
+    public Vector3 GravityAcceleration => _gravityAcceleration;
+    public Vector3 LastPosition => _particles.Count == 0 ? transform.position : _particles[_particles.Count - 1].CurrentPosition;
+    public Vector3 LastVelocity => _lastEndpointVelocity;
 
-    private void Awake() {
-        _lineRenderer = GetComponent<LineRenderer>();
-        _lineRenderer.positionCount = _numOfRopeSegments;
+    public Vector3 EndpointTangent
+    {
+        get
+        {
+            if (_particles.Count < 2)
+                return Vector3.down;
 
-        Vector3 startPoint = _anchorPoint != null ? _anchorPoint.position : transform.position;
-
-        for (int i = 0; i < _numOfRopeSegments; i++) {
-            _ropeSegments.Add(new RopeSegment(startPoint));
-            startPoint.y -= _ropeSegmentLength;
+            Vector3 tangent = _particles[_particles.Count - 1].CurrentPosition - _particles[_particles.Count - 2].CurrentPosition;
+            return tangent.sqrMagnitude > 0.000001f ? tangent.normalized : Vector3.down;
         }
     }
 
-    private void Update() {
-        DrawRope();
-/*        UpdateEndBall();*/
-
-        if (Input.GetKeyDown(KeyCode.S)) {
-            AddImpulseToLastSegment(Vector3.right * 1f);
-        }
-
-        if (Input.GetKeyDown(KeyCode.W)) {
-            AddImpulseToLastSegment(Vector3.left * 1f);
-        }
-
-        if (Input.GetKeyDown(KeyCode.D)) {
-            AddImpulseToLastSegment(Vector3.forward * 1f);
-        }
-
-        if (Input.GetKeyDown(KeyCode.A)) {
-            AddImpulseToLastSegment(Vector3.back * 1f);
-        }
+    private void Awake()
+    {
+        BuildParticlesIfNeeded();
     }
 
-    private void FixedUpdate() {
-        SimulateTwist();
-
-        Simulate();
-
-        for (int i = 0; i < _numOfConstraintRuns; i++) {
-            ApplyConstraints();
-
-            if (i % _collisionSegmentInterval == 0) {
-                HandleCollisions();
-            }
-        }
-    }
-
-    private void Simulate() {
-        for (int i = 0; i < _ropeSegments.Count; i++) {
-            RopeSegment segment = _ropeSegments[i];
-
-            Vector3 velocity = (segment.CurrentPosition - segment.OldPosition) * _dampingFactor;
-
-            segment.OldPosition = segment.CurrentPosition;
-            segment.CurrentPosition += velocity;
-            segment.CurrentPosition += _gravityForce * Time.fixedDeltaTime * Time.fixedDeltaTime;
-
-
-            _ropeSegments[i] = segment;
-        }
-    }
-
-    private void ApplyConstraints() {
-        RopeSegment firstSegment = _ropeSegments[0];
-        firstSegment.CurrentPosition = _anchorPoint != null ? _anchorPoint.position : transform.position;
-        _ropeSegments[0] = firstSegment;
-
-        for (int i = 0; i < _numOfRopeSegments - 1; i++) {
-            RopeSegment currentSeg = _ropeSegments[i];
-            RopeSegment nextSeg = _ropeSegments[i + 1];
-
-            Vector3 delta = currentSeg.CurrentPosition - nextSeg.CurrentPosition;
-            float dist = delta.magnitude;
-
-            if (dist == 0f)
-                continue;
-
-            float currentSegmentLength = GetCurrentSegmentLength();
-            float difference = dist - currentSegmentLength;
-            Vector3 changeDir = delta.normalized;
-            Vector3 changeVector = changeDir * difference;
-
-            if (i != 0) {
-                currentSeg.CurrentPosition -= changeVector * 0.5f;
-                nextSeg.CurrentPosition += changeVector * 0.5f;
-            } else {
-                nextSeg.CurrentPosition += changeVector;
-            }
-
-            _ropeSegments[i] = currentSeg;
-            _ropeSegments[i + 1] = nextSeg;
-        }
-
-
-    }
-
-    private void HandleCollisions() {
-        for (int i = 1; i < _ropeSegments.Count; i++) {
-            RopeSegment segment = _ropeSegments[i];
-
-            Vector3 velocity = segment.CurrentPosition - segment.OldPosition;
-
-            Collider[] colliders = Physics.OverlapSphere(
-                segment.CurrentPosition,
-                _collisionRadius,
-                _collisionMask
-            );
-
-            foreach (Collider collider in colliders) {
-                Vector3 closestPoint = collider.ClosestPoint(segment.CurrentPosition);
-                float distance = Vector3.Distance(segment.CurrentPosition, closestPoint);
-
-                if (distance < _collisionRadius) {
-                    Vector3 normal = (segment.CurrentPosition - closestPoint).normalized;
-
-                    if (normal == Vector3.zero) {
-                        normal = (segment.CurrentPosition - collider.transform.position).normalized;
-                    }
-
-                    float depth = _collisionRadius - distance;
-                    segment.CurrentPosition += normal * depth;
-
-                    velocity = Vector3.Reflect(velocity, normal) * _bounceFactor;
-                }
-            }
-
-            segment.OldPosition = segment.CurrentPosition - velocity;
-            _ropeSegments[i] = segment;
-        }
-    }
-
-    private void DrawRope() {
-        Vector3[] ropePositions = new Vector3[_numOfRopeSegments];
-
-        for (int i = 0; i < _ropeSegments.Count; i++) {
-            ropePositions[i] = _ropeSegments[i].CurrentPosition;
-        }
-
-        _lineRenderer.SetPositions(ropePositions);
-    }
-
-    public struct RopeSegment {
-        public Vector3 CurrentPosition;
-        public Vector3 OldPosition;
-
-        public RopeSegment(Vector3 position) {
-            CurrentPosition = position;
-            OldPosition = position;
-        }
-    }
-
-/*    private void UpdateEndBall() {
-        if (_endBall == null) return;
-
-        RopeSegment lastSegment = _ropeSegments[_ropeSegments.Count - 1];
-        _endBall.position = lastSegment.CurrentPosition;
-    }*/
-
-    private float GetCurrentSegmentLength() {
-        float normalizedTwist = Mathf.Clamp01(Mathf.Abs(_twistAmount) / _maxTwistAmount);
-
-        float shortening = normalizedTwist * _twistShorteningFactor;
-
-        return _ropeSegmentLength * (1f - shortening);
-    }
-
-    private void SimulateTwist() {
-        float restoringForce = -_twistAmount * _twistStiffness;
-        float dampingForce = -_twistVelocity * _twistDamping;
-
-        float twistAcceleration = restoringForce + dampingForce;
-
-        _twistVelocity += twistAcceleration * Time.fixedDeltaTime;
-        _twistAmount += _twistVelocity * Time.fixedDeltaTime;
-
-        _twistAmount = Mathf.Clamp(TwistAmount, -_maxTwistAmount, _maxTwistAmount);
-    }
-
-    public void AddTwist(float amount) {
-        _twistAmount = Mathf.Clamp(_twistAmount + amount, -_maxTwistAmount, _maxTwistAmount);
-    }
-
-    public void AddImpulseToLastSegment(Vector3 impulse) {
-        if (_ropeSegments.Count == 0) {
+    private void FixedUpdate()
+    {
+        if (!_isSimulating || _particles.Count < 2)
             return;
+
+        SimulateParticles();
+
+        for (int iteration = 0; iteration < _constraintIterations; iteration++)
+            SolveDistanceConstraints();
+
+        // Collision is intentionally evaluated once after the solver, not inside every iteration.
+        if (_enableRopeCollision && _collisionMask.value != 0)
+            ResolveRopeCollisions();
+
+        _lastEndpointVelocity = GetParticleVelocity(_particles.Count - 1);
+    }
+
+    public void ResetSimulation(Vector3 endpointPosition)
+    {
+        BuildParticlesIfNeeded();
+
+        Vector3 anchorPosition = GetAnchorPosition();
+        for (int i = 0; i < _particles.Count; i++)
+        {
+            float t = i / (float)(_particles.Count - 1);
+            Vector3 position = Vector3.Lerp(anchorPosition, endpointPosition, t);
+            RopeParticle particle = _particles[i];
+            particle.CurrentPosition = position;
+            particle.PreviousPosition = position;
+            _particles[i] = particle;
         }
 
-        int lastIndex = _ropeSegments.Count - 1;
+        _lastEndpointVelocity = Vector3.zero;
+        _isSimulating = false;
+    }
 
-        RopeSegment lastSegment = _ropeSegments[lastIndex];
+    public void BeginSimulation()
+    {
+        _isSimulating = true;
+    }
 
-        lastSegment.OldPosition -= impulse;
+    public void StopSimulation()
+    {
+        _isSimulating = false;
+        _lastEndpointVelocity = Vector3.zero;
 
-        _ropeSegments[lastIndex] = lastSegment;
+        for (int i = 0; i < _particles.Count; i++)
+        {
+            RopeParticle particle = _particles[i];
+            particle.PreviousPosition = particle.CurrentPosition;
+            _particles[i] = particle;
+        }
+    }
+
+    public void SetEndpointVelocity(Vector3 velocity)
+    {
+        if (_particles.Count == 0)
+            return;
+
+        int lastIndex = _particles.Count - 1;
+        RopeParticle endpoint = _particles[lastIndex];
+        endpoint.PreviousPosition = endpoint.CurrentPosition - velocity * Time.fixedDeltaTime;
+        _particles[lastIndex] = endpoint;
+        _lastEndpointVelocity = velocity;
+    }
+
+    public void SetPayloadMass(float payloadMass)
+    {
+        _payloadMass = Mathf.Max(0.0001f, payloadMass);
+    }
+
+    public void SetLengthRatio(float lengthRatio)
+    {
+        _lengthRatio = Mathf.Clamp(lengthRatio, 0.05f, 1f);
     }
 
     public Vector3 GetLastSegmentPosition()
     {
-        return _ropeSegments[_ropeSegments.Count - 1].CurrentPosition;
+        return LastPosition;
     }
 
     public Vector3 GetAnchorPointPosition()
     {
-        return _anchorPoint.position;
+        return GetAnchorPosition();
+    }
+
+    private void BuildParticlesIfNeeded()
+    {
+        if (_particles.Count == _particleCount)
+            return;
+
+        _particles.Clear();
+        Vector3 anchorPosition = GetAnchorPosition();
+        Vector3 initialDirection = _anchorPoint != null ? -_anchorPoint.up : Vector3.down;
+        float segmentLength = _totalRopeLength / (_particleCount - 1);
+
+        for (int i = 0; i < _particleCount; i++)
+        {
+            Vector3 position = anchorPosition + initialDirection * segmentLength * i;
+            _particles.Add(new RopeParticle(position));
+        }
+
+        _lastEndpointVelocity = Vector3.zero;
+    }
+
+    private void SimulateParticles()
+    {
+        float deltaTimeSquared = Time.fixedDeltaTime * Time.fixedDeltaTime;
+
+        for (int i = 1; i < _particles.Count; i++)
+        {
+            RopeParticle particle = _particles[i];
+            Vector3 velocity = (particle.CurrentPosition - particle.PreviousPosition) * _linearDamping;
+
+            particle.PreviousPosition = particle.CurrentPosition;
+            particle.CurrentPosition += velocity + _gravityAcceleration * deltaTimeSquared;
+            _particles[i] = particle;
+        }
+    }
+
+    private void SolveDistanceConstraints()
+    {
+        RopeParticle anchorParticle = _particles[0];
+        Vector3 anchorPosition = GetAnchorPosition();
+        anchorParticle.CurrentPosition = anchorPosition;
+        anchorParticle.PreviousPosition = anchorPosition;
+        _particles[0] = anchorParticle;
+
+        float desiredSegmentLength = EffectiveRopeLength / (_particles.Count - 1);
+
+        for (int i = 0; i < _particles.Count - 1; i++)
+        {
+            RopeParticle first = _particles[i];
+            RopeParticle second = _particles[i + 1];
+
+            Vector3 delta = second.CurrentPosition - first.CurrentPosition;
+            float distance = delta.magnitude;
+            if (distance < 0.000001f)
+                continue;
+
+            float error = distance - desiredSegmentLength;
+            Vector3 correction = delta * (error / distance);
+
+            float firstInverseMass = GetInverseMass(i);
+            float secondInverseMass = GetInverseMass(i + 1);
+            float inverseMassSum = firstInverseMass + secondInverseMass;
+            if (inverseMassSum <= 0f)
+                continue;
+
+            first.CurrentPosition += correction * (firstInverseMass / inverseMassSum);
+            second.CurrentPosition -= correction * (secondInverseMass / inverseMassSum);
+
+            _particles[i] = first;
+            _particles[i + 1] = second;
+        }
+    }
+
+    private void ResolveRopeCollisions()
+    {
+        for (int i = 1; i < _particles.Count; i++)
+        {
+            RopeParticle particle = _particles[i];
+            Vector3 velocity = particle.CurrentPosition - particle.PreviousPosition;
+
+            int colliderCount = Physics.OverlapSphereNonAlloc(
+                particle.CurrentPosition,
+                _collisionRadius,
+                _collisionBuffer,
+                _collisionMask,
+                QueryTriggerInteraction.Ignore);
+
+            for (int colliderIndex = 0; colliderIndex < colliderCount; colliderIndex++)
+            {
+                Collider collider = _collisionBuffer[colliderIndex];
+                if (collider == null)
+                    continue;
+
+                Vector3 closestPoint = collider.ClosestPoint(particle.CurrentPosition);
+                Vector3 away = particle.CurrentPosition - closestPoint;
+                float distance = away.magnitude;
+
+                if (distance >= _collisionRadius)
+                    continue;
+
+                Vector3 normal = distance > 0.000001f
+                    ? away / distance
+                    : (particle.CurrentPosition - collider.bounds.center).normalized;
+
+                if (normal.sqrMagnitude < 0.000001f)
+                    normal = Vector3.up;
+
+                particle.CurrentPosition += normal * (_collisionRadius - distance);
+                velocity = Vector3.Reflect(velocity, normal) * _collisionBounce;
+            }
+
+            particle.PreviousPosition = particle.CurrentPosition - velocity;
+            _particles[i] = particle;
+        }
+    }
+
+    private float GetInverseMass(int particleIndex)
+    {
+        if (particleIndex == 0)
+            return 0f;
+
+        float mass = particleIndex == _particles.Count - 1 ? _payloadMass : _ropeParticleMass;
+        return 1f / Mathf.Max(0.0001f, mass);
+    }
+
+    private Vector3 GetParticleVelocity(int particleIndex)
+    {
+        if (particleIndex < 0 || particleIndex >= _particles.Count || Time.fixedDeltaTime <= 0f)
+            return Vector3.zero;
+
+        RopeParticle particle = _particles[particleIndex];
+        return (particle.CurrentPosition - particle.PreviousPosition) / Time.fixedDeltaTime;
+    }
+
+    private Vector3 GetAnchorPosition()
+    {
+        return _anchorPoint != null ? _anchorPoint.position : transform.position;
+    }
+
+    private void OnValidate()
+    {
+        _particleCount = Mathf.Max(2, _particleCount);
+        _totalRopeLength = Mathf.Max(0.01f, _totalRopeLength);
+        _ropeParticleMass = Mathf.Max(0.0001f, _ropeParticleMass);
+        _constraintIterations = Mathf.Max(1, _constraintIterations);
+        _collisionRadius = Mathf.Max(0.001f, _collisionRadius);
+    }
+
+    public struct RopeParticle
+    {
+        public Vector3 CurrentPosition;
+        public Vector3 PreviousPosition;
+
+        public RopeParticle(Vector3 position)
+        {
+            CurrentPosition = position;
+            PreviousPosition = position;
+        }
     }
 }
