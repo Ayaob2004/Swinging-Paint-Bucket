@@ -416,7 +416,7 @@ MonoBehaviour:
   _attachLeft: {fileID: 1048438672}
   _attachRight: {fileID: 299916059}
   _centerOfMass: {fileID: 1068417477}
-  _initialForwardBackSwingAngle: 0
+  _initialForwardBackSwingAngle: 12
   _initialLeftRightSwingAngle: 0
   _initialRopeTwistAngle: 0
   _initialHingeAngle: 0
@@ -699,7 +699,7 @@ MonoBehaviour:
   autoFindObjects: 1
   collisionObjects:
   - {fileID: 86664663}
-  - {fileID: 1953790149}
+  - {fileID: 1289579593}
   gridCellSize: 0.2
   logObjectDetails: 1
   objectCount: 0
@@ -727,14 +727,14 @@ MonoBehaviour:
   showSpawnBounds: 1
   spawnRegions:
   - localCentre: {x: 0, y: 0, z: 0}
-    size: 5
+    size: 4
     paintColor: {r: 0, g: 0.32883978, b: 1, a: 1}
   - localCentre: {x: 0, y: 0, z: 0}
-    size: 5
+    size: 4
     paintColor: {r: 1, g: 0.04705882, b: 0.16308215, a: 1}
-  debug_num_particles: 148176
-  debug_bucket_particles: 43440
-  debug_spawn_volume: 250
+  debug_num_particles: 78608
+  debug_bucket_particles: 22752
+  debug_spawn_volume: 128
 --- !u!114 &984308215
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -834,7 +834,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::DynamicFluidRenderVolume
   _bucketCollisionObject: {fileID: 86664663}
   _paintOutletRegion: {fileID: 86664662}
-  _drawingSurface: {fileID: 1953790154}
+  _drawingSurface: {fileID: 1289579592}
   _maximumRelativeExitSpeed: 5
   _maximumUpwardExitSpeed: 0
   _safetyMargin: 0.5
@@ -904,6 +904,291 @@ Transform:
   m_Children: []
   m_Father: {fileID: 86664662}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &1289579588
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1289579589}
+  - component: {fileID: 1289579595}
+  - component: {fileID: 1289579594}
+  - component: {fileID: 1289579593}
+  - component: {fileID: 1289579592}
+  - component: {fileID: 1289579590}
+  - component: {fileID: 1289579591}
+  - component: {fileID: 1289579596}
+  - component: {fileID: 1289579597}
+  m_Layer: 0
+  m_Name: Panel
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &1289579589
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1289579588}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: -28, z: 0}
+  m_LocalScale: {x: 30, y: 0.3, z: 30}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &1289579590
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1289579588}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d8dbf9e465ae3d848a86086e941719d9, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::CanvasMaterialManager
+  currentType: 1
+  paper:
+    type: 0
+    material: {fileID: 2100000, guid: 58407738790d3284db1313184010bd02, type: 2}
+    absorption: 0.8
+    spread: 0.6
+    adhesion: 0.8
+    roughness: 0.4
+    gloss: 0.1
+    dryingRate: 0.8
+    satelliteStrength: 0.25
+    fingerStrength: 0.35
+    anisotropy: 0
+  fabric:
+    type: 1
+    material: {fileID: 2100000, guid: b8e494e376738ec499d54d544f928a67, type: 2}
+    absorption: 0.9
+    spread: 0.8
+    adhesion: 0.85
+    roughness: 0.8
+    gloss: 0.05
+    dryingRate: 0.45
+    satelliteStrength: 0.4
+    fingerStrength: 0.7
+    anisotropy: 0.5
+  wood:
+    type: 2
+    material: {fileID: 2100000, guid: ca471c8a8d81c1842b6d8c484c7d87c4, type: 2}
+    absorption: 0.45
+    spread: 0.55
+    adhesion: 0.7
+    roughness: 0.55
+    gloss: 0.35
+    dryingRate: 0.5
+    satelliteStrength: 0.25
+    fingerStrength: 0.5
+    anisotropy: 0.8
+  metal:
+    type: 3
+    material: {fileID: 2100000, guid: e15ea55e5ce502f4295ccdfb7021338d, type: 2}
+    absorption: 0.05
+    spread: 0.25
+    adhesion: 0.35
+    roughness: 0.15
+    gloss: 0.9
+    dryingRate: 0.15
+    satelliteStrength: 0.65
+    fingerStrength: 0.15
+    anisotropy: 0
+--- !u!114 &1289579591
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1289579588}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d833c7ce66d6c0945a079ec817b8fead, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::PaintCanvasPainter
+  canvasMaterialManager: {fileID: 1289579590}
+  uvPlane: 0
+  localURange: {x: -0.5, y: 0.5}
+  localVRange: {x: -0.5, y: 0.5}
+  useGpuPainting: 1
+  paintCompute: {fileID: 7200000, guid: 5ea0797acee74e147b8afe00cc78546c, type: 3}
+  textureResolution: 512
+  enableDrying: 1
+  dryingUpdateInterval: 0.08
+  dryingSpeedMultiplier: 0.35
+  wetVisualBoost: 0.25
+  createOverlayAutomatically: 1
+  overlayRenderer: {fileID: 0}
+  overlayOffset: 0.015
+  localSurfaceOffset: 0.5
+  overlayObjectName: PaintOverlay
+  allowCpuTestImpacts: 1
+  maxCpuTestImpactsPerFrame: 128
+  logImpacts: 1
+  drawGizmos: 1
+  lastHitWorldPoint: {x: 0, y: 0, z: 0}
+  lastHitUV: {x: 0, y: 0}
+  lastRadiusUV: 0
+  lastSpeed: 0
+  totalImpacts: 0
+  enableKeyboardSave: 1
+  saveKey: 112
+  exportFolderName: SavedPaintings
+  exportFilePrefix: painting
+  includeCanvasBaseColor: 1
+  exportTransparentOverlayOnly: 0
+  fallbackBaseColor: {r: 0.9, g: 0.9, b: 0.8, a: 1}
+  useAsyncGpuReadbackForExport: 1
+--- !u!114 &1289579592
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1289579588}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e916be3feebb741429d7e33dfc5d34ce, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::DrawingSurface
+  _collisionObject: {fileID: 1289579593}
+  _usePositiveLocalYFace: 1
+--- !u!114 &1289579593
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1289579588}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 0ab3e37d4cd1ff846ab0bf7b371962cd, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Seb.Fluid.Collision.MeshCollisionObject
+  meshFilter: {fileID: 1289579595}
+  includeInFluidCollision: 1
+  isDynamic: 0
+  collisionThickness: 0.1
+  collisionDamping: 0.85
+  friction: 0.05
+--- !u!23 &1289579594
+MeshRenderer:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1289579588}
+  m_Enabled: 1
+  m_CastShadows: 1
+  m_ReceiveShadows: 1
+  m_DynamicOccludee: 1
+  m_StaticShadowCaster: 0
+  m_MotionVectors: 1
+  m_LightProbeUsage: 1
+  m_ReflectionProbeUsage: 1
+  m_RayTracingMode: 2
+  m_RayTraceProcedural: 0
+  m_RayTracingAccelStructBuildFlagsOverride: 0
+  m_RayTracingAccelStructBuildFlags: 1
+  m_SmallMeshCulling: 1
+  m_ForceMeshLod: -1
+  m_MeshLodSelectionBias: 0
+  m_RenderingLayerMask: 1
+  m_RendererPriority: 0
+  m_Materials:
+  - {fileID: 10303, guid: 0000000000000000f000000000000000, type: 0}
+  m_StaticBatchInfo:
+    firstSubMesh: 0
+    subMeshCount: 0
+  m_StaticBatchRoot: {fileID: 0}
+  m_ProbeAnchor: {fileID: 0}
+  m_LightProbeVolumeOverride: {fileID: 0}
+  m_ScaleInLightmap: 1
+  m_ReceiveGI: 1
+  m_PreserveUVs: 0
+  m_IgnoreNormalsForChartDetection: 0
+  m_ImportantGI: 0
+  m_StitchLightmapSeams: 1
+  m_SelectedEditorRenderState: 3
+  m_MinimumChartSize: 4
+  m_AutoUVMaxDistance: 0.5
+  m_AutoUVMaxAngle: 89
+  m_LightmapParameters: {fileID: 0}
+  m_GlobalIlluminationMeshLod: 0
+  m_SortingLayerID: 0
+  m_SortingLayer: 0
+  m_SortingOrder: 0
+  m_MaskInteraction: 0
+  m_AdditionalVertexStreams: {fileID: 0}
+--- !u!33 &1289579595
+MeshFilter:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1289579588}
+  m_Mesh: {fileID: 10202, guid: 0000000000000000e000000000000000, type: 0}
+--- !u!114 &1289579596
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1289579588}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 75c2e60f7a5250a4a94a3c9f6dbf00ad, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::PaintGpuImpactDetector
+  fluidSim: {fileID: 984308215}
+  painter: {fileID: 1289579591}
+  canvasMaterialManager: {fileID: 1289579590}
+  canvasTransform: {fileID: 1289579589}
+  impactDetectorCompute: {fileID: 7200000, guid: c7026d9ac5b9600439b3f7d526499c04, type: 3}
+  canvasPlane: 0
+  enableDetection: 1
+  checkEveryNFrames: 2
+  particleDiameter: 0.06
+  paintMass: 0.35
+  minImpactSpeed: 0.35
+  useManualIncline: 1
+  inclineAngleDegrees: 0
+  downhillDirectionDegrees: 90
+  applyInclineToCanvasTransform: 0
+  inclineRotationAxis: 0
+  inclineStretchStrength: 1.25
+  inclineShiftStrength: 0.45
+  inclineTailStrength: 1.35
+  inclineFingerDamping: 0.65
+  maxImpactCount: 512
+  maxSatellitesPerHit: 4
+  logInitialization: 1
+--- !u!114 &1289579597
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1289579588}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a1dce58d49c77bd4e9000a1e2ad695e6, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::PaintCanvasHUD
+  painter: {fileID: 1289579591}
+  canvasMaterialManager: {fileID: 1289579590}
+  uiText: {fileID: 0}
+  drawOnGUIIfNoText: 1
 --- !u!1001 &1366700761
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -955,6 +1240,10 @@ PrefabInstance:
     - target: {fileID: 919132149155446097, guid: dc9dbe75a5b737444898b9bea88ac0ad, type: 3}
       propertyPath: m_Name
       value: Drawing Surface
+      objectReference: {fileID: 0}
+    - target: {fileID: 919132149155446097, guid: dc9dbe75a5b737444898b9bea88ac0ad, type: 3}
+      propertyPath: m_IsActive
+      value: 0
       objectReference: {fileID: 0}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
@@ -1171,6 +1460,7 @@ SceneRoots:
   - {fileID: 128587421}
   - {fileID: 310981074}
   - {fileID: 505055365}
+  - {fileID: 1289579589}
   - {fileID: 1636608984}
   - {fileID: 1454591640}
   - {fileID: 1063595158}

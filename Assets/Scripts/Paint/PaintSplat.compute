@@ -1,0 +1,201 @@
+#pragma kernel ClearTexture
+#pragma kernel PaintSplats
+#pragma kernel DryWetness
+
+RWTexture2D<float4> StainTexture;
+RWTexture2D<float> WetnessTexture;
+RWTexture2D<float4> DisplayTexture;
+
+int textureResolution;
+int maxImpactCount;
+
+float dryingAmount;
+float wetVisualBoost;
+
+struct PaintImpact
+{
+    float4 centerRadius;
+    float4 color;
+    float4 parameters0;
+    float4 parameters1;
+};
+
+StructuredBuffer<PaintImpact> Impacts;
+
+float4 AlphaBlend(float4 dst, float4 src)
+{
+    float outA = src.a + dst.a * (1.0 - src.a);
+
+    if (outA <= 0.0001)
+    {
+        return float4(0, 0, 0, 0);
+    }
+
+    float3 outRGB = (src.rgb * src.a + dst.rgb * dst.a * (1.0 - src.a)) / outA;
+    return float4(outRGB, saturate(outA));
+}
+
+float4 BuildDisplayColor(float4 stain, float wet)
+{
+    if (stain.a <= 0.001)
+    {
+        return float4(0, 0, 0, 0);
+    }
+
+    float3 boosted = lerp(stain.rgb, float3(1, 1, 1), saturate(wet * wetVisualBoost));
+    return float4(boosted, stain.a);
+}
+
+float2 NormalizeSafe(float2 v, float2 fallback)
+{
+    float lenSq = dot(v, v);
+
+    if (lenSq < 0.000001)
+    {
+        return fallback;
+    }
+
+    return v * rsqrt(lenSq);
+}
+
+[numthreads(8, 8, 1)]
+void ClearTexture(uint3 id : SV_DispatchThreadID)
+{
+    uint res = (uint)textureResolution;
+
+    if (id.x >= res || id.y >= res)
+    {
+        return;
+    }
+
+    int2 pixel = int2(id.xy);
+
+    StainTexture[pixel] = float4(0, 0, 0, 0);
+    WetnessTexture[pixel] = 0;
+    DisplayTexture[pixel] = float4(0, 0, 0, 0);
+}
+
+[numthreads(8, 8, 1)]
+void PaintSplats(uint3 id : SV_DispatchThreadID)
+{
+    uint res = (uint)textureResolution;
+
+    if (id.x >= res || id.y >= res)
+    {
+        return;
+    }
+
+    int2 pixel = int2(id.xy);
+    float2 uv = (float2(id.xy) + 0.5) / (float)textureResolution;
+
+    float4 stain = StainTexture[pixel];
+    float wet = WetnessTexture[pixel];
+
+    for (int i = 0; i < maxImpactCount; i++)
+    {
+        PaintImpact impact = Impacts[i];
+
+        if (impact.parameters1.x < 0.5)
+        {
+            continue;
+        }
+
+        float2 centerUV = impact.centerRadius.xy;
+        float radiusU = impact.centerRadius.z;
+        float radiusV = impact.centerRadius.w;
+
+        float angleRad = impact.parameters0.x;
+        float intensity = impact.parameters0.y;
+        float edgeNoise = impact.parameters0.z;
+        float wetnessAmount = impact.parameters0.w;
+
+        float2 downhillDir = NormalizeSafe(impact.parameters1.yz, float2(0.0, 1.0));
+        float tiltTailStrength = impact.parameters1.w;
+
+        float2 p = uv - centerUV;
+
+        float c = cos(angleRad);
+        float s = sin(angleRad);
+
+        float2 rotated;
+        rotated.x = p.x * c + p.y * s;
+        rotated.y = -p.x * s + p.y * c;
+
+        float ru = max(radiusU, 0.0001);
+        float rv = max(radiusV, 0.0001);
+
+        float q = (rotated.x * rotated.x) / (ru * ru) + (rotated.y * rotated.y) / (rv * rv);
+
+        float noise = frac(sin(dot(uv * textureResolution, float2(12.9898, 78.233))) * 43758.5453);
+        float noisyBoundary = 1.0 + (noise - 0.5) * edgeNoise * 0.9;
+
+        float amount = 0.0;
+
+        // Central elliptical deposit.
+        if (q <= noisyBoundary)
+        {
+            float gaussian = exp(-q * 2.25);
+            amount += saturate(gaussian * intensity);
+        }
+
+        // Inclined-canvas downhill tail / streak.
+        // This creates an advancing-side extension along gravity projection.
+        if (tiltTailStrength > 0.001)
+        {
+            float downhillDistance = dot(p, downhillDir);
+            float sideDistance = dot(p, float2(-downhillDir.y, downhillDir.x));
+
+            if (downhillDistance > 0.0)
+            {
+                float tailLength = ru * (1.25 + tiltTailStrength * 2.5);
+                float tailWidth = rv * lerp(0.45, 0.22, saturate(tiltTailStrength));
+
+                float axial = downhillDistance / max(tailLength, 0.0001);
+                float lateral = sideDistance / max(tailWidth, 0.0001);
+
+                float tailMask = exp(-axial * 3.2) * exp(-lateral * lateral * 2.8);
+                tailMask *= saturate(1.0 - axial);
+
+                float tailNoise = frac(sin(dot((uv + centerUV) * textureResolution, float2(41.13, 19.97))) * 12515.31);
+                tailMask *= lerp(0.55, 1.25, tailNoise);
+
+                amount += saturate(tailMask * intensity * tiltTailStrength * 0.45);
+            }
+        }
+
+        if (amount <= 0.0001)
+        {
+            continue;
+        }
+
+        float4 src = impact.color;
+        src.a *= saturate(amount);
+
+        stain = AlphaBlend(stain, src);
+        wet = saturate(wet + amount * wetnessAmount);
+    }
+
+    StainTexture[pixel] = stain;
+    WetnessTexture[pixel] = wet;
+    DisplayTexture[pixel] = BuildDisplayColor(stain, wet);
+}
+
+[numthreads(8, 8, 1)]
+void DryWetness(uint3 id : SV_DispatchThreadID)
+{
+    uint res = (uint)textureResolution;
+
+    if (id.x >= res || id.y >= res)
+    {
+        return;
+    }
+
+    int2 pixel = int2(id.xy);
+
+    float wet = WetnessTexture[pixel];
+    wet = max(0, wet - dryingAmount);
+    WetnessTexture[pixel] = wet;
+
+    float4 stain = StainTexture[pixel];
+    DisplayTexture[pixel] = BuildDisplayColor(stain, wet);
+}

@@ -1,0 +1,392 @@
+#pragma kernel ClearImpacts
+#pragma kernel DetectCanvasImpacts
+#pragma kernel CopyCurrentToPrevious
+#pragma kernel ClearDeposited
+
+StructuredBuffer<float3> Positions;
+StructuredBuffer<float3> Velocities;
+StructuredBuffer<float4> Colors;
+
+StructuredBuffer<float3> PreviousPositionsRead;
+RWStructuredBuffer<float3> PreviousPositionsWrite;
+RWStructuredBuffer<uint> DepositedBuffer;
+struct PaintImpact
+{
+    float4 centerRadius;
+    float4 color;
+    float4 parameters0;
+    float4 parameters1;
+};
+
+RWStructuredBuffer<PaintImpact> ImpactBuffer;
+RWStructuredBuffer<uint> ImpactCounter;
+
+int particleCount;
+int maxImpactCount;
+
+float4x4 worldToCanvas;
+
+int canvasPlane;
+// 0 = LocalXZ
+// 1 = LocalXY
+
+float2 localURange;
+float2 localVRange;
+float localSurfaceOffset;
+
+float minImpactSpeed;
+float paintMass;
+float particleDiameter;
+
+float absorption;
+float spread;
+float roughness;
+float satelliteStrength;
+float fingerStrength;
+float anisotropy;
+
+int maxSatellitesPerHit;
+
+float inclineAngleDegrees;
+float2 downhillUV;
+float inclineStretchStrength;
+float inclineShiftStrength;
+float inclineTailStrength;
+float inclineFingerDamping;
+
+float Rand01(float seed)
+{
+    return frac(sin(seed * 12.9898) * 43758.5453);
+}
+
+float2 NormalizeSafe(float2 v, float2 fallback)
+{
+    float lenSq = dot(v, v);
+
+    if (lenSq < 0.000001)
+    {
+        return fallback;
+    }
+
+    return v * rsqrt(lenSq);
+}
+
+void AddImpact(
+    float2 centerUV,
+    float4 color,
+    float radiusU,
+    float radiusV,
+    float angleRad,
+    float intensity,
+    float edgeNoise,
+    float wetnessAmount,
+    float2 downhillDirection,
+    float tiltTailStrength)
+{
+    uint index;
+    InterlockedAdd(ImpactCounter[0], 1, index);
+
+    if (index >= (uint)maxImpactCount)
+    {
+        return;
+    }
+
+    PaintImpact impact;
+    impact.centerRadius = float4(centerUV.x, centerUV.y, radiusU, radiusV);
+    impact.color = float4(color.rgb, 1.0);
+    impact.parameters0 = float4(angleRad, intensity, edgeNoise, wetnessAmount);
+
+    // x = valid
+    // y = downhill.x
+    // z = downhill.y
+    // w = tilt tail strength
+    impact.parameters1 = float4(1.0, downhillDirection.x, downhillDirection.y, tiltTailStrength);
+
+    ImpactBuffer[index] = impact;
+}
+
+[numthreads(64, 1, 1)]
+void ClearImpacts(uint3 id : SV_DispatchThreadID)
+{
+    uint i = id.x;
+
+    if (i == 0)
+    {
+        ImpactCounter[0] = 0;
+    }
+
+    if (i >= (uint)maxImpactCount)
+    {
+        return;
+    }
+
+    PaintImpact emptyImpact;
+    emptyImpact.centerRadius = float4(0, 0, 0, 0);
+    emptyImpact.color = float4(0, 0, 0, 0);
+    emptyImpact.parameters0 = float4(0, 0, 0, 0);
+    emptyImpact.parameters1 = float4(0, 0, 0, 0);
+
+    ImpactBuffer[i] = emptyImpact;
+}
+
+[numthreads(64, 1, 1)]
+void CopyCurrentToPrevious(uint3 id : SV_DispatchThreadID)
+{
+    uint i = id.x;
+
+    if (i >= (uint)particleCount)
+    {
+        return;
+    }
+
+    PreviousPositionsWrite[i] = Positions[i];
+}
+
+[numthreads(64, 1, 1)]
+void ClearDeposited(uint3 id : SV_DispatchThreadID)
+{
+    uint i = id.x;
+
+    if (i >= (uint)particleCount)
+    {
+        return;
+    }
+
+    DepositedBuffer[i] = 0;
+}
+
+[numthreads(64, 1, 1)]
+void DetectCanvasImpacts(uint3 id : SV_DispatchThreadID)
+{
+    uint i = id.x;
+
+    if (i >= (uint)particleCount)
+    {
+        return;
+    }
+    if (DepositedBuffer[i] != 0)
+    {
+        return;
+    }
+    float3 prevWorld = PreviousPositionsRead[i];
+    float3 currWorld = Positions[i];
+
+    float3 prevLocal = mul(worldToCanvas, float4(prevWorld, 1.0)).xyz;
+    float3 currLocal = mul(worldToCanvas, float4(currWorld, 1.0)).xyz;
+
+    float prevSigned;
+    float currSigned;
+
+    if (canvasPlane == 0)
+    {
+        prevSigned = prevLocal.y - localSurfaceOffset;
+        currSigned = currLocal.y - localSurfaceOffset;
+    }
+    else
+    {
+        prevSigned = prevLocal.z + localSurfaceOffset;
+        currSigned = currLocal.z + localSurfaceOffset;
+    }
+
+    bool crossed =
+        (prevSigned > 0.0 && currSigned <= 0.0) ||
+        (prevSigned < 0.0 && currSigned >= 0.0);
+
+    if (!crossed)
+    {
+        return;
+    }
+
+    float denom = prevSigned - currSigned;
+
+    if (abs(denom) < 0.000001)
+    {
+        return;
+    }
+
+    float t = saturate(prevSigned / denom);
+    float3 hitWorld = lerp(prevWorld, currWorld, t);
+    float3 hitLocal = mul(worldToCanvas, float4(hitWorld, 1.0)).xyz;
+
+    float uValue;
+    float vValue;
+
+    if (canvasPlane == 0)
+    {
+        uValue = hitLocal.x;
+        vValue = hitLocal.z;
+    }
+    else
+    {
+        uValue = hitLocal.x;
+        vValue = hitLocal.y;
+    }
+
+    float u = (uValue - localURange.x) / max(localURange.y - localURange.x, 0.000001);
+    float v = (vValue - localVRange.x) / max(localVRange.y - localVRange.x, 0.000001);
+
+    if (u < 0.0 || u > 1.0 || v < 0.0 || v > 1.0)
+    {
+        return;
+    }
+
+    float3 velocity = Velocities[i];
+    float speed = length(velocity);
+
+    if (speed < minImpactSpeed)
+    {
+        return;
+    }
+
+    float alphaRad = radians(clamp(inclineAngleDegrees, 0.0, 75.0));
+    float incline01 = saturate(inclineAngleDegrees / 60.0);
+
+    float normalSpeedFactor = max(cos(alphaRad), 0.15);
+
+    float effectiveSpeed = speed * normalSpeedFactor;
+    float speed01 = saturate((effectiveSpeed - 0.2) / (8.0 - 0.2));
+
+    float2 downhillDirection = NormalizeSafe(downhillUV, float2(0.0, 1.0));
+
+    float baseRadius =
+        lerp(0.012, 0.075, speed01) *
+        lerp(0.65, 1.55, spread) *
+        lerp(1.15, 0.65, absorption) *
+        lerp(1.05, 0.75, roughness);
+
+    // Inclined surfaces produce asymmetric spreading.
+    // We slightly reduce the circular impact energy but stretch downhill.
+    baseRadius *= lerp(1.0, 0.88, incline01);
+    baseRadius = clamp(baseRadius, 0.004, 0.2);
+
+    float splashStrength =
+        speed01 *
+        lerp(1.1, 0.65, roughness) *
+        lerp(0.8, 1.25, satelliteStrength);
+
+    // Paper observation: higher incline angle decreases number of fingers/satellite-like features.
+    splashStrength *= lerp(1.0, 1.0 - inclineFingerDamping, incline01);
+    splashStrength = saturate(splashStrength);
+
+    float intensity =
+        max(0.01, paintMass) *
+        lerp(1.15, 0.65, absorption);
+
+    intensity = saturate(intensity);
+
+    float surfaceAnisotropy = saturate(anisotropy);
+    float inclineStretch = 1.0 + incline01 * inclineStretchStrength;
+
+    float radiusU = baseRadius * lerp(1.0, 2.2, surfaceAnisotropy);
+    float radiusV = baseRadius * lerp(1.0, 0.65, surfaceAnisotropy);
+
+    // Inclination dominates the ellipse orientation, because liquid advances downhill.
+    float tiltAngle = atan2(downhillDirection.y, downhillDirection.x);
+
+    float3 localVelocity = mul((float3x3)worldToCanvas, velocity);
+
+    float2 tangent;
+
+    if (canvasPlane == 0)
+    {
+        tangent = float2(localVelocity.x, localVelocity.z);
+    }
+    else
+    {
+        tangent = float2(localVelocity.x, localVelocity.y);
+    }
+
+    float tangentAngle = tiltAngle;
+
+    if (dot(tangent, tangent) > 0.0001)
+    {
+        tangentAngle = atan2(tangent.y, tangent.x);
+    }
+
+    float angleRad = lerp(tangentAngle, tiltAngle, incline01);
+
+    radiusU *= inclineStretch;
+    radiusV *= lerp(1.0, 0.82, incline01);
+
+    radiusU = clamp(radiusU, 0.003, 0.28);
+    radiusV = clamp(radiusV, 0.003, 0.25);
+
+    float edgeNoise = roughness * 0.45 + fingerStrength * splashStrength * 0.25;
+    edgeNoise *= lerp(1.0, 0.78, incline01);
+    edgeNoise = saturate(edgeNoise);
+
+    float wetnessAmount = 1.0 - absorption * 0.45;
+
+    float downstreamShift = baseRadius * incline01 * inclineShiftStrength;
+    float2 centerUV = float2(u, v) + downhillDirection * downstreamShift;
+
+    if (centerUV.x < 0.0 || centerUV.x > 1.0 || centerUV.y < 0.0 || centerUV.y > 1.0)
+    {
+        return;
+    }
+
+    float tiltTailStrength = incline01 * inclineTailStrength * lerp(1.15, 0.45, absorption);
+
+    float4 color = Colors[i];
+    color.a = 1.0;
+
+    AddImpact(
+        centerUV,
+        color,
+        radiusU,
+        radiusV,
+        angleRad,
+        intensity,
+        edgeNoise,
+        wetnessAmount,
+        downhillDirection,
+        tiltTailStrength
+    );
+    DepositedBuffer[i] = 1;
+    uint satelliteCount = (uint)round(lerp(0.0, (float)maxSatellitesPerHit, splashStrength));
+
+    for (uint s = 0; s < satelliteCount; s++)
+    {
+        float seed = (float)i * 17.17 + (float)s * 31.31;
+
+        float a = Rand01(seed + 1.0) * 6.2831853;
+
+        // Bias satellites slightly downhill when inclined.
+        float2 randomDir = float2(cos(a), sin(a));
+        float2 biasedDir = NormalizeSafe(lerp(randomDir, downhillDirection, incline01 * 0.65), randomDir);
+
+        float r0 = max(Rand01(seed + 2.0), 0.001);
+        float distanceFactor = exp(-1.6 + 0.55 * (r0 * 2.0 - 1.0));
+        distanceFactor = clamp(distanceFactor, 0.15, 2.5);
+
+        float distance = baseRadius * lerp(1.2, 4.5, splashStrength) * distanceFactor;
+        distance *= lerp(1.0, 1.45, incline01);
+
+        float2 satUV = centerUV + biasedDir * distance;
+
+        if (satUV.x < 0.0 || satUV.x > 1.0 || satUV.y < 0.0 || satUV.y > 1.0)
+        {
+            continue;
+        }
+
+        float radiusRand = Rand01(seed + 3.0);
+        float satRadius = lerp(baseRadius * 0.08, baseRadius * 0.28, radiusRand);
+
+        float intensityRand = Rand01(seed + 4.0);
+        float satIntensity = intensity * lerp(0.2, 0.65, intensityRand);
+        satIntensity *= lerp(1.0, 0.75, incline01);
+
+        AddImpact(
+            satUV,
+            color,
+            satRadius,
+            satRadius * lerp(1.0, 0.75, incline01),
+            tiltAngle,
+            satIntensity,
+            edgeNoise * 0.6,
+            1.0 - absorption * 0.35,
+            downhillDirection,
+            tiltTailStrength * 0.45
+        );
+    }
+}
