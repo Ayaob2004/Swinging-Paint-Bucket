@@ -44,7 +44,29 @@ public sealed class RopeVerlet3D : MonoBehaviour
     public Vector3 GravityAcceleration => _gravityAcceleration;
     public Vector3 LastPosition => _particles.Count == 0 ? transform.position : _particles[_particles.Count - 1].CurrentPosition;
     public Vector3 LastVelocity => _lastEndpointVelocity;
+    public float LinearDamping => _linearDamping;
+    public int ConstraintIterations => _constraintIterations;
 
+    public void SetBaseRopeLength(float length)
+    {
+        _totalRopeLength = Mathf.Max(0.01f, length);
+        SetLengthRatio(_lengthRatio);
+    }
+
+    public void SetGravityAcceleration(Vector3 gravityAcceleration)
+    {
+        _gravityAcceleration = gravityAcceleration;
+    }
+
+    public void SetLinearDamping(float damping)
+    {
+        _linearDamping = Mathf.Clamp(damping, 0.90f, 1f);
+    }
+
+    public void SetConstraintIterations(int iterations)
+    {
+        _constraintIterations = Mathf.Max(1, iterations);
+    }
     public Vector3 EndpointTangent
     {
         get

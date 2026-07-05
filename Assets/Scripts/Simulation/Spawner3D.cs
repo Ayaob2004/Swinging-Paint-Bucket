@@ -36,9 +36,35 @@ namespace Seb.Fluid.Simulation
         public int debug_num_particles;
         public int debug_bucket_particles;
         public float debug_spawn_volume;
-
+        
         public Transform BucketFillPoint => bucketFillPoint;
+        public int ParticleSpawnDensity => particleSpawnDensity;
 
+        public void SetParticleSpawnDensity(int density)
+        {
+            particleSpawnDensity = Mathf.Max(1, density);
+        }
+
+        public Color GetPrimaryPaintColor()
+        {
+            if (spawnRegions == null || spawnRegions.Length == 0)
+                return Color.red;
+
+            return spawnRegions[0].paintColor;
+        }
+
+        public void SetAllPaintColors(Color color)
+        {
+            if (spawnRegions == null)
+                return;
+
+            for (int i = 0; i < spawnRegions.Length; i++)
+            {
+                SpawnRegion region = spawnRegions[i];
+                region.paintColor = color;
+                spawnRegions[i] = region;
+            }
+        }
         /// <summary>
         /// Generates particle positions in world space from the bucket's current pose.
         /// This is intentionally called at initialization and at every fluid reset.
@@ -230,7 +256,7 @@ namespace Seb.Fluid.Simulation
             public float size;
             [FormerlySerializedAs("debugDisplayCol")]
             [Tooltip(
-                "áæä ÇáÌÒíÆÇÊ Ýí åÐå ÇáãäØÞÉ"
+                "ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½"
             )]
             public Color paintColor;
 
@@ -248,6 +274,38 @@ namespace Seb.Fluid.Simulation
             public float3[] points;
             public float3[] velocities;
             public Color[] colors;
+        }
+
+        public int SpawnRegionCount
+        {
+            get
+            {
+                if (spawnRegions == null)
+                    return 0;
+
+                return spawnRegions.Length;
+            }
+        }
+
+        public Color GetSpawnRegionColor(int index)
+        {
+            if (spawnRegions == null || spawnRegions.Length == 0)
+                return Color.white;
+
+            index = Mathf.Clamp(index, 0, spawnRegions.Length - 1);
+            return spawnRegions[index].paintColor;
+        }
+
+        public void SetSpawnRegionColor(int index, Color color)
+        {
+            if (spawnRegions == null || spawnRegions.Length == 0)
+                return;
+
+            index = Mathf.Clamp(index, 0, spawnRegions.Length - 1);
+
+            SpawnRegion region = spawnRegions[index];
+            region.paintColor = color;
+            spawnRegions[index] = region;
         }
     }
 }

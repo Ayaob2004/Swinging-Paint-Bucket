@@ -17,6 +17,11 @@ public sealed class SimulationCoordinator : MonoBehaviour
     [SerializeField] private MeshCollisionBuilder _meshCollisionBuilder;
     [SerializeField] private DynamicFluidRenderVolume _renderVolume;
 
+    [Header("Optional Painting Reset")]
+    [SerializeField] private PaintCanvasPainter _paintCanvasPainter;
+    [SerializeField] private PaintGpuImpactDetector _paintImpactDetector;
+    [SerializeField] private bool _clearCanvasOnReset = true;
+
     [Header("Fixed-Step Synchronization")]
     [SerializeField, Min(1)] private int _fluidSubstepsPerFixedStep = 2;
 
@@ -101,6 +106,9 @@ public sealed class SimulationCoordinator : MonoBehaviour
         _renderVolume.ResetHistory();
         _renderVolume.UpdateBounds(_fluidSim.gravity);
         _fluidSim.ResetFluidAtCurrentSpawn();
+
+        ResetPaintingCanvas();
+
         _meshCollisionBuilder.SynchronizeDynamicObjects();
         _renderVolume.UpdateBounds(_fluidSim.gravity);
         _fluidSim.BakeDensityMap(forceDensityUpdate: true);
@@ -165,6 +173,12 @@ public sealed class SimulationCoordinator : MonoBehaviour
 
         if (_fluidSim != null && _fluidSim.renderVolume == null)
             _fluidSim.renderVolume = _renderVolume;
+        
+        if (_paintCanvasPainter == null)
+            _paintCanvasPainter = FindAnyObjectByType<PaintCanvasPainter>();
+
+        if (_paintImpactDetector == null)
+            _paintImpactDetector = FindAnyObjectByType<PaintGpuImpactDetector>();
     }
 
     private bool HasRequiredReferences()
@@ -177,4 +191,27 @@ public sealed class SimulationCoordinator : MonoBehaviour
     {
         _fluidSubstepsPerFixedStep = Mathf.Max(1, _fluidSubstepsPerFixedStep);
     }
+
+    public void ClearPaintingCanvas()
+{
+    if (_paintCanvasPainter != null)
+        _paintCanvasPainter.ClearPaint();
+
+    if (_paintImpactDetector != null)
+        _paintImpactDetector.ResetPreviousPositions();
+}
+
+private void ResetPaintingCanvas()
+{
+    if (!_clearCanvasOnReset)
+        return;
+
+    ClearPaintingCanvas();
+}
+
+public void SetFluidSubstepsPerFixedStep(int substeps)
+{
+    _fluidSubstepsPerFixedStep = Mathf.Max(1, substeps);
+}
+
 }

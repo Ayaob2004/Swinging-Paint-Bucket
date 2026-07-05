@@ -94,7 +94,51 @@ public sealed class BucketMotionController : MonoBehaviour
     public float CurrentHingeAngle => _hingeAngle;
     public float CurrentPitchAngle => _pitchAngle;
     public float CurrentRollAngle => _rollAngle;
+    public float BucketMass => _bucketMass;
+    public float InitialForwardBackSwingAngle => _initialForwardBackSwingAngle;
+    public float InitialLeftRightSwingAngle => _initialLeftRightSwingAngle;
+    public float InitialRopeTwistAngle => _initialRopeTwistAngle;
+    public Vector3 InitialLinearVelocity => _initialLinearVelocity;
+    public float InitialTwistAngularVelocity => _initialTwistAngularVelocity;
+    public float InitialHingeAngularVelocity => _initialHingeAngularVelocity;
+    public float InitialPitchAngularVelocity => _initialPitchAngularVelocity;
+    public float InitialRollAngularVelocity => _initialRollAngularVelocity;
 
+    public void SetBucketMass(float mass)
+    {
+        _bucketMass = Mathf.Max(0.01f, mass);
+
+        if (_rope != null)
+            _rope.SetPayloadMass(_bucketMass);
+    }
+
+    public void SetInitialSwingAngles(float forwardBackAngle, float leftRightAngle)
+    {
+        _initialForwardBackSwingAngle = Mathf.Clamp(forwardBackAngle, -85f, 85f);
+        _initialLeftRightSwingAngle = Mathf.Clamp(leftRightAngle, -85f, 85f);
+    }
+
+    public void SetInitialRopeTwistAngle(float twistAngle)
+    {
+        _initialRopeTwistAngle = Mathf.Clamp(twistAngle, -180f, 180f);
+    }
+
+    public void SetInitialLinearVelocity(Vector3 velocity)
+    {
+        _initialLinearVelocity = velocity;
+    }
+
+    public void SetInitialAngularVelocities(
+        float twistAngularVelocity,
+        float hingeAngularVelocity,
+        float pitchAngularVelocity,
+        float rollAngularVelocity)
+    {
+        _initialTwistAngularVelocity = twistAngularVelocity;
+        _initialHingeAngularVelocity = hingeAngularVelocity;
+        _initialPitchAngularVelocity = pitchAngularVelocity;
+        _initialRollAngularVelocity = rollAngularVelocity;
+    }
     private void Awake()
     {
         CaptureBasePose();
