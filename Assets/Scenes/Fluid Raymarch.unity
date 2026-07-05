@@ -565,7 +565,6 @@ MonoBehaviour:
   densityOffset: 180
   numRefractions: 2
   extinctionCoefficients: {x: 14, y: 5, z: 4}
-  fluidColor: {r: 0, g: 0.106405616, b: 1, a: 1}
   paintOpacity: 0.5
   densityMultiplier: 0.055
   stepSize: 0.03
@@ -729,10 +728,13 @@ MonoBehaviour:
   spawnRegions:
   - localCentre: {x: 0, y: 0, z: 0}
     size: 5
-    debugDisplayCol: {r: 0, g: 0.32883978, b: 1, a: 1}
-  debug_num_particles: 74088
-  debug_bucket_particles: 21720
-  debug_spawn_volume: 125
+    paintColor: {r: 0, g: 0.32883978, b: 1, a: 1}
+  - localCentre: {x: 0, y: 0, z: 0}
+    size: 5
+    paintColor: {r: 1, g: 0.04705882, b: 0.16308215, a: 1}
+  debug_num_particles: 148176
+  debug_bucket_particles: 43440
+  debug_spawn_volume: 250
 --- !u!114 &984308215
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -780,6 +782,7 @@ MonoBehaviour:
   meshCollisionBuilder: {fileID: 984308213}
   renderVolume: {fileID: 1063595159}
   DensityMap: {fileID: 0}
+  ColorMap: {fileID: 0}
 --- !u!4 &1048438672 stripped
 Transform:
   m_CorrespondingSourceObject: {fileID: -5646461424789816684, guid: 06dcae7365376e94d953860271867380, type: 3}

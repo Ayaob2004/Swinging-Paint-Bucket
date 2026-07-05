@@ -21,7 +21,7 @@ namespace Seb.Fluid.Rendering {
         public Vector3 extinctionCoefficients;
 
         [Header("Paint Look")]
-        public Color fluidColor = new Color(1f, 0.12f, 0.02f, 1f); // orange/red paint
+       // public Color fluidColor = new Color(1f, 0.12f, 0.02f, 1f); // orange/red paint
         [Range(0, 1)] public float paintOpacity = 1f;
         public float densityMultiplier = 0.001f;
         [Min(0.01f)] public float stepSize = 0.02f;
@@ -101,7 +101,7 @@ namespace Seb.Fluid.Rendering {
 
         [ImageEffectOpaque]
         void OnRenderImage(RenderTexture src, RenderTexture target) {
-            if (sim != null && renderVolume != null && sim.DensityMap != null) {
+            if (sim != null && renderVolume != null && sim.DensityMap != null && sim.ColorMap != null) {
                 SetShaderParams();
                 Graphics.Blit(src, target, raymarchMat);
             } else {
@@ -112,6 +112,7 @@ namespace Seb.Fluid.Rendering {
         void SetShaderParams() {
             SetEnvironmentParams(raymarchMat, environmentSettings);
             raymarchMat.SetTexture("DensityMap", sim.DensityMap);
+            raymarchMat.SetTexture("ColorMap", sim.ColorMap);
             raymarchMat.SetVector("boundsSize", renderVolume.WorldSize);
             raymarchMat.SetMatrix("densityVolumeLocalToWorld", renderVolume.LocalToWorldMatrix);
             raymarchMat.SetMatrix("densityVolumeWorldToLocal", renderVolume.WorldToLocalMatrix);
@@ -124,7 +125,6 @@ namespace Seb.Fluid.Rendering {
             raymarchMat.SetFloat("lightStepSize", lightStepSize);
             raymarchMat.SetInt("numRefractions", numRefractions);
             raymarchMat.SetVector("extinctionCoeff", extinctionCoefficients);
-            raymarchMat.SetColor("fluidColor", fluidColor);
             raymarchMat.SetFloat("paintOpacity", paintOpacity);
 
         }

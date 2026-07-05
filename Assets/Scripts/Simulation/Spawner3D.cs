@@ -51,7 +51,8 @@ namespace Seb.Fluid.Simulation
                 return new SpawnData
                 {
                     points = Array.Empty<float3>(),
-                    velocities = Array.Empty<float3>()
+                    velocities = Array.Empty<float3>(),
+                    colors = Array.Empty<Color>()
                 };
             }
 
@@ -61,12 +62,14 @@ namespace Seb.Fluid.Simulation
                 return new SpawnData
                 {
                     points = Array.Empty<float3>(),
-                    velocities = Array.Empty<float3>()
+                    velocities = Array.Empty<float3>(),
+                    colors = Array.Empty<Color>()
                 };
             }
 
             List<float3> allPoints = new();
             List<float3> allVelocities = new();
+            List<Color> allColors = new();
 
             foreach (SpawnRegion region in spawnRegions)
             {
@@ -77,12 +80,15 @@ namespace Seb.Fluid.Simulation
                 (float3[] points, float3[] velocities) = SpawnBucket(particlesPerAxis, region);
                 allPoints.AddRange(points);
                 allVelocities.AddRange(velocities);
+                for (int i = 0; i < points.Length; i++)
+                { allColors.Add(region.paintColor); }
             }
 
             return new SpawnData
             {
                 points = allPoints.ToArray(),
-                velocities = allVelocities.ToArray()
+                velocities = allVelocities.ToArray(),
+                colors = allColors.ToArray()
             };
         }
 
@@ -206,7 +212,7 @@ namespace Seb.Fluid.Simulation
 
             foreach (SpawnRegion region in spawnRegions)
             {
-                Gizmos.color = region.debugDisplayCol;
+                Gizmos.color = region.paintColor;
                 Gizmos.DrawWireCube(region.localCentre, Vector3.one * region.size);
             }
 
@@ -222,7 +228,11 @@ namespace Seb.Fluid.Simulation
 
             [Min(0.001f)]
             public float size;
-            public Color debugDisplayCol;
+            [FormerlySerializedAs("debugDisplayCol")]
+            [Tooltip(
+                "áæä ÇáÌÒíÆÇÊ Ýí åÐå ÇáãäØÞÉ"
+            )]
+            public Color paintColor;
 
             public float Volume => size * size * size;
 
@@ -237,6 +247,7 @@ namespace Seb.Fluid.Simulation
         {
             public float3[] points;
             public float3[] velocities;
+            public Color[] colors;
         }
     }
 }

@@ -40,12 +40,12 @@ Shader "Fluid/Raymarching"
             }
             sampler2D _MainTex;
             Texture3D<float4> DensityMap;
+            Texture3D<float4> ColorMap;
             SamplerState linearClampSampler;
 
             const float indexOfRefraction;
             const int numRefractions;
             const float3 extinctionCoeff;
-            const float4 fluidColor;
             const float paintOpacity;
 
             const float3 testParams;
@@ -290,6 +290,14 @@ Shader "Fluid/Raymarching"
 
                 return DensityMap.SampleLevel(linearClampSampler, uvw, 0).r - volumeValueOffset;
             }
+             float3 SampleColor(float3 pos)
+            {
+                float3 uvw = (pos + boundsSize * 0.5) / boundsSize;
+                float rawDensity = max(DensityMap.SampleLevel(linearClampSampler, uvw, 0).r, 1e-4);
+                float3 weightedColor = ColorMap.SampleLevel(linearClampSampler, uvw, 0).rgb;
+                return weightedColor / rawDensity;
+            }
+
 
 
             float CalculateDensityAlongRay(float3 rayPos, float3 rayDir, float stepSize)
@@ -627,7 +635,8 @@ Shader "Fluid/Raymarching"
                     ) * 1.5
                 );
 
-                float3 paintLit = fluidColor.rgb * (0.45 + 0.75 * diffuse) + specular.xxx;
+               float3 surfaceColor = SampleColor(surfaceInfo.pos);
+               float3 paintLit = surfaceColor * (0.45 + 0.75 * diffuse) + specular.xxx;
 
                 // استخدم صورة المشهد الأصلية كخلفية بدل السماء والأرضية التجريبية
                 float3 environment = sceneColor;

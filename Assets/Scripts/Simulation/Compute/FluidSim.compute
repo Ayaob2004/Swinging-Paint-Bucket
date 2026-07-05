@@ -24,6 +24,7 @@ RWStructuredBuffer<float3> Positions;
 RWStructuredBuffer<float3> PredictedPositions;
 RWStructuredBuffer<float3> Velocities;
 RWStructuredBuffer<float2> Densities; // Density, Near Density
+RWStructuredBuffer<float4> Colors;
 
 // Spatial hashing
 RWStructuredBuffer<uint> SpatialKeys;
@@ -123,6 +124,7 @@ const float interactionInputRadius;
 
 // Volume texture settings
 RWTexture3D<float> DensityMap;
+RWTexture3D<float4> ColorMap;
 const uint3 densityMapSize;
 const float splatDensityScale;
 const float predictionTimestep;
@@ -541,6 +543,7 @@ void UpdateSpatialHash(uint3 id : SV_DispatchThreadID)
 RWStructuredBuffer<float3> SortTarget_Positions;
 RWStructuredBuffer<float3> SortTarget_PredictedPositions;
 RWStructuredBuffer<float3> SortTarget_Velocities;
+RWStructuredBuffer<float4> SortTarget_Colors;
 
 [numthreads(ThreadGroupSize, 1, 1)]
 void Reorder(uint3 id : SV_DispatchThreadID)
@@ -551,6 +554,7 @@ void Reorder(uint3 id : SV_DispatchThreadID)
     SortTarget_Positions[id.x] = Positions[sortedIndex];
     SortTarget_PredictedPositions[id.x] = PredictedPositions[sortedIndex];
     SortTarget_Velocities[id.x] = Velocities[sortedIndex];
+    SortTarget_Colors[id.x] = Colors[sortedIndex];
 }
 
 [numthreads(ThreadGroupSize, 1, 1)]
@@ -562,6 +566,7 @@ void ReorderCopyBack(uint3 id : SV_DispatchThreadID)
     Positions[id.x] = SortTarget_Positions[id.x];
     PredictedPositions[id.x] = SortTarget_PredictedPositions[id.x];
     Velocities[id.x] = SortTarget_Velocities[id.x];
+    Colors[id.x] = SortTarget_Colors[id.x];
 }
 
 float2 CalculateDensitiesAtPoint(float3 pos)
@@ -604,6 +609,56 @@ float2 CalculateDensitiesAtPoint(float3 pos)
     }
 
     return float2(density, nearDensity);
+}
+struct DensityColorSample
+{
+    float density;
+    float3 weightedColor; // sum of (neighbour color * kernel weight); not yet normalized by density
+};
+
+// Same neighbour search as CalculateDensitiesAtPoint, but also accumulates a density-weighted color sum.
+// Used only by the per-voxel density-texture bake (AccurateSPHPerVoxel) -- kept separate from
+// CalculateDensitiesAtPoint so the per-particle density/pressure hot path stays exactly as before.
+DensityColorSample CalculateDensityAndColorAtPoint(float3 pos)
+{
+    int3 originCell = GetCell3D(pos, smoothingRadius);
+    float sqrRadius = smoothingRadius * smoothingRadius;
+    float density = 0;
+    float3 weightedColor = 0;
+
+    for (int i = 0; i < 27; i++)
+    {
+        uint hash = HashCell3D(originCell + offsets3D[i]);
+        uint key = KeyFromHash(hash, numParticles);
+        uint currIndex = SpatialOffsets[key];
+
+        while (currIndex < numParticles)
+        {
+            uint neighbourIndex = currIndex;
+            currIndex++;
+
+            uint neighbourKey = SpatialKeys[neighbourIndex];
+            if (neighbourKey != key)
+                break;
+
+            float3 neighbourPos = PredictedPositions[neighbourIndex];
+            float3 offsetToNeighbour = neighbourPos - pos;
+            float sqrDstToNeighbour = dot(offsetToNeighbour, offsetToNeighbour);
+
+            if (sqrDstToNeighbour > sqrRadius)
+                continue;
+
+            float dst = sqrt(sqrDstToNeighbour);
+            float weight = DensityKernel(dst, smoothingRadius);
+            density += weight;
+            weightedColor += Colors[neighbourIndex].rgb * weight;
+        }
+    }
+
+    DensityColorSample result;
+    result.density = density;
+    result.weightedColor = weightedColor;
+    return result;
 }
 
 [numthreads(ThreadGroupSize, 1, 1)]
@@ -878,7 +933,14 @@ void UpdateDensityTexture(uint3 id : SV_DispatchThreadID)
     float3 worldVoxelPos =
         mul(densityVolumeLocalToWorld, float4(localVoxelPos, 1)).xyz;
 
-    DensityMap[id] = CalculateDensitiesAtPoint(worldVoxelPos)[0];
+    DensityColorSample sample = CalculateDensityAndColorAtPoint(worldVoxelPos);
+    DensityMap[id] = sample.density;
+   // float3 finalColor = sample.density > 0
+   // ? sample.weightedColor / sample.density
+   // : 0;
+
+  //  ColorMap[id] = float4(finalColor, 1);
+    ColorMap[id] = float4(sample.weightedColor, 0);
 }
 
 float3 VolumeCoordToLocalPos(float3 volumeCoord01)
@@ -898,6 +960,7 @@ void ClearDensityTexture(uint3 id : SV_DispatchThreadID)
         return;
 
     DensityMap[id] = 0;
+    ColorMap[id] = 0;
 }
 
 // Fast O(N) density bake: each particle splats kernel-weighted values into nearby voxels.
@@ -915,7 +978,7 @@ void SplatDensityFromParticles(uint3 id : SV_DispatchThreadID)
     // هذه المصفوفة تحتوي Position + Rotation فقط، بدون Scale.
     float3 localParticlePos =
     mul(densityVolumeWorldToLocal, float4(worldParticlePos, 1)).xyz;
-
+    float3 col = Colors[id.x].rgb;
     float3 volumeCoord = LocalPosToVolumeCoord(localParticlePos);
 
     float3 voxelLocalSize =
@@ -942,11 +1005,14 @@ void SplatDensityFromParticles(uint3 id : SV_DispatchThreadID)
                 float dst = length(voxelLocalPos - localParticlePos);
                 float density = DensityKernel(dst, smoothingRadius);
 
-                if (density > 0)
+                if (density > 0){
                     DensityMap[voxel] += density * splatDensityScale;
+                    ColorMap[voxel] += float4(col * density * splatDensityScale, 0);
+                }
             }
         }
     }
+
 }
 
 [numthreads(ThreadGroupSize, 1, 1)]

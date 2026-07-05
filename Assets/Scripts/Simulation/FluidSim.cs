@@ -84,6 +84,7 @@ namespace Seb.Fluid.Simulation
         public DynamicFluidRenderVolume renderVolume;
 
         [HideInInspector] public RenderTexture DensityMap;
+		[HideInInspector] public RenderTexture ColorMap;
 		public Vector3 Scale => renderVolume != null ? renderVolume.WorldSize : transform.localScale;
 
 		// Buffers
@@ -95,10 +96,12 @@ namespace Seb.Fluid.Simulation
 		public ComputeBuffer densityBuffer { get; private set; }
 		public ComputeBuffer predictedPositionsBuffer;
 		public ComputeBuffer debugBuffer { get; private set; }
+		public ComputeBuffer colorBuffer { get; private set; }
 
 		ComputeBuffer sortTarget_positionBuffer;
 		ComputeBuffer sortTarget_velocityBuffer;
 		ComputeBuffer sortTarget_predictedPositionsBuffer;
+		ComputeBuffer sortTarget_colorBuffer;
 
 		// Kernel IDs
 		const int externalForcesKernel = 0;
@@ -158,11 +161,11 @@ namespace Seb.Fluid.Simulation
 			foamSortTargetBuffer = CreateStructuredBuffer<FoamParticle>(maxFoamParticleCount);
 			foamCountBuffer = CreateStructuredBuffer<uint>(4096);
 			debugBuffer = CreateStructuredBuffer<float3>(numParticles);
-
+			colorBuffer = CreateStructuredBuffer<Color>(numParticles);
 			sortTarget_positionBuffer = CreateStructuredBuffer<float3>(numParticles);
 			sortTarget_predictedPositionsBuffer = CreateStructuredBuffer<float3>(numParticles);
 			sortTarget_velocityBuffer = CreateStructuredBuffer<float3>(numParticles);
-
+			sortTarget_colorBuffer = CreateStructuredBuffer<Color>(numParticles);
 			bufferNameLookup = new Dictionary<ComputeBuffer, string>
 			{
 				{ positionBuffer, "Positions" },
@@ -178,7 +181,9 @@ namespace Seb.Fluid.Simulation
 				{ foamCountBuffer, "WhiteParticleCounters" },
 				{ foamBuffer, "WhiteParticles" },
 				{ foamSortTargetBuffer, "WhiteParticlesCompacted" },
-				{ debugBuffer, "Debug" }
+				{ debugBuffer, "Debug" },
+				{ colorBuffer,"Colors" },
+				{ sortTarget_colorBuffer,"SortTarget_Colors" }
 			};
 
             if (meshCollisionBuilder != null) {
@@ -233,6 +238,7 @@ namespace Seb.Fluid.Simulation
 				predictedPositionsBuffer,
 				sortTarget_predictedPositionsBuffer,
 				velocityBuffer,
+				colorBuffer, sortTarget_colorBuffer,
 				sortTarget_velocityBuffer,
 				spatialHash.SpatialIndices
 			});
@@ -245,6 +251,7 @@ namespace Seb.Fluid.Simulation
 				predictedPositionsBuffer,
 				sortTarget_predictedPositionsBuffer,
 				velocityBuffer,
+				colorBuffer, sortTarget_colorBuffer,
 				sortTarget_velocityBuffer,
 				spatialHash.SpatialIndices
 			});
@@ -313,13 +320,14 @@ namespace Seb.Fluid.Simulation
 				densityBuffer,
 				spatialHash.SpatialKeys,
 				spatialHash.SpatialOffsets,
+				colorBuffer
 			});
 
 			SetBuffers(compute, clearDensityKernel, bufferNameLookup, new ComputeBuffer[] { });
 
 			SetBuffers(compute, splatDensityKernel, bufferNameLookup, new ComputeBuffer[]
 			{
-				positionBuffer,
+				positionBuffer,colorBuffer
 			});
 
 			// Foam update kernel
@@ -454,6 +462,9 @@ namespace Seb.Fluid.Simulation
 			compute.SetTexture(clearDensityKernel, "DensityMap", DensityMap);
 			compute.SetTexture(renderKernel, "DensityMap", DensityMap);
 			compute.SetTexture(splatDensityKernel, "DensityMap", DensityMap);
+			compute.SetTexture(clearDensityKernel, "ColorMap", ColorMap);
+			compute.SetTexture(renderKernel, "ColorMap", ColorMap);
+			compute.SetTexture(splatDensityKernel, "ColorMap", ColorMap);
 			compute.SetInts("densityMapSize", cachedDensityMapSize.x, cachedDensityMapSize.y, cachedDensityMapSize.z);
 			compute.SetFloat("splatDensityScale", splatDensityScale);
 
@@ -479,6 +490,7 @@ namespace Seb.Fluid.Simulation
 
 			cachedDensityMapSize = desiredSize;
 			CreateRenderTexture3D(ref DensityMap, desiredSize.x, desiredSize.y, desiredSize.z, UnityEngine.Experimental.Rendering.GraphicsFormat.R16_SFloat, TextureWrapMode.Clamp);
+			CreateRenderTexture3D(ref ColorMap, desiredSize.x, desiredSize.y, desiredSize.z,UnityEngine.Experimental.Rendering.GraphicsFormat.R16G16B16A16_SFloat, TextureWrapMode.Clamp);
 		}
 
 		void RunSimulationStep()
@@ -576,6 +588,8 @@ namespace Seb.Fluid.Simulation
 			predictedPositionsBuffer.SetData(spawnData.points);
 			velocityBuffer.SetData(spawnData.velocities);
 			densityBuffer.SetData(new float2[densityBuffer.count]);
+			colorBuffer.SetData(spawnData.colors);
+			sortTarget_colorBuffer.SetData(new Color[sortTarget_colorBuffer.count]);
 			sortTarget_positionBuffer.SetData(new float3[sortTarget_positionBuffer.count]);
 			sortTarget_predictedPositionsBuffer.SetData(new float3[sortTarget_predictedPositionsBuffer.count]);
 			sortTarget_velocityBuffer.SetData(new float3[sortTarget_velocityBuffer.count]);
@@ -686,7 +700,9 @@ namespace Seb.Fluid.Simulation
             Release(predictedPositionsBuffer);
             Release(velocityBuffer);
             Release(densityBuffer);
-            Release(foamBuffer);
+			Release(colorBuffer);
+			Release(sortTarget_colorBuffer);
+			Release(foamBuffer);
             Release(foamSortTargetBuffer);
             Release(foamCountBuffer);
             Release(debugBuffer);
@@ -698,7 +714,9 @@ namespace Seb.Fluid.Simulation
             predictedPositionsBuffer = null;
             velocityBuffer = null;
             densityBuffer = null;
-            foamBuffer = null;
+			colorBuffer = null;
+			sortTarget_colorBuffer = null;
+			foamBuffer = null;
             foamSortTargetBuffer = null;
             foamCountBuffer = null;
             debugBuffer = null;
