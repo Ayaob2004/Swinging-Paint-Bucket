@@ -7,8 +7,8 @@
 #pragma kernel CalculateViscosity
 #pragma kernel UpdatePositions
 #pragma kernel UpdateDensityTexture
-#pragma kernel UpdateWhiteParticles
-#pragma kernel WhiteParticlePrepareNextFrame
+// #pragma kernel UpdateWhiteParticles
+// #pragma kernel WhiteParticlePrepareNextFrame
 #pragma kernel ClearDensityTexture
 #pragma kernel SplatDensityFromParticles
 
@@ -128,33 +128,6 @@ RWTexture3D<float4> ColorMap;
 const uint3 densityMapSize;
 const float splatDensityScale;
 const float predictionTimestep;
-const int foamEnabled;
-
-// ---- Foam, spray, and bubbles ----
-struct WhiteParticle
-{
-    float3 position;
-    float3 velocity;
-    float remainingLifetime;
-    float scale;
-};
-
-RWStructuredBuffer<WhiteParticle> WhiteParticles;
-RWStructuredBuffer<WhiteParticle> WhiteParticlesCompacted;
-// Holds 2 values:
-// [0] = ActiveCount: (num particles alive or spawned in at the start of the frame)
-// [1] = SurvivorCount: (num particles surviving to the next frame -- copied into compact buffer)
-RWStructuredBuffer<uint> WhiteParticleCounters;
-const uint MaxWhiteParticleCount;
-const float whiteParticleDeltaTime;
-
-const float3 trappedAirParams;
-const float2 kineticEnergyParams;
-const float bubbleBuoyancy;
-const int bubbleClassifyMinNeighbours;
-const int sprayClassifyMaxNeighbours;
-const float bubbleScale;
-const float bubbleScaleChangeSpeed;
 
 float PressureFromDensity(float density)
 {
@@ -718,8 +691,6 @@ void CalculatePressureForce(uint3 id : SV_DispatchThreadID)
     float sqrRadius = smoothingRadius * smoothingRadius;
     int neighbourCount = 0;
 
-    // Foam variables
-    float weightedVelocityDifference = 0;
 
 
     // Neighbour search
@@ -764,17 +735,6 @@ void CalculatePressureForce(uint3 id : SV_DispatchThreadID)
             // Update pressure force
             pressureForce += dirToNeighbour * DensityDerivative(dstToNeighbour, smoothingRadius) * sharedPressure / densityNeighbour;
             pressureForce += dirToNeighbour * NearDensityDerivative(dstToNeighbour, smoothingRadius) * sharedNearPressure / nearDensityNeighbour;
-
-            if (foamEnabled)
-            {
-                // ---- White Particle 'Trapped Air' Calculation ----
-                float3 relativeVelocity = velocity - Velocities[neighbourIndex];
-                float relativeVelocityMagnitude = length(relativeVelocity);
-                float3 relativeVelocityDir = relativeVelocity / max(0.000001, relativeVelocityMagnitude);
-                float convergeWeight = 1 - dot(relativeVelocityDir, -dirToNeighbour);
-                float influence = 1 - min(1, dstToNeighbour / smoothingRadius);
-                weightedVelocityDifference += relativeVelocityMagnitude * convergeWeight * influence;
-            }
         }
     }
 
@@ -786,53 +746,6 @@ void CalculatePressureForce(uint3 id : SV_DispatchThreadID)
     if (neighbourCount < 8)
     {
         Velocities[id.x] -= Velocities[id.x] * deltaTime * 0.75;
-    }
-
-
-    if (foamEnabled)
-    {
-        uint rngState = dot(asuint(float4(pos, simTime)), uint4(19349669, 83492837, 73856131, 4785773));
-        if (id.x == 0) WhiteParticleCounters[1] = 0;
-
-        float trappedAirFactor = trappedAirParams[0] * Remap01(weightedVelocityDifference, trappedAirParams[1], trappedAirParams[2]);
-        float kineticEnergyFactor = Remap01(dot(velocity, velocity), kineticEnergyParams[0], kineticEnergyParams[1]);
-        float particleSpawnFactor = trappedAirFactor * kineticEnergyFactor * deltaTime;
-
-        int particleSpawnCount = floor(particleSpawnFactor);
-        float fractionalSpawnRemainder = particleSpawnFactor - particleSpawnCount;
-        if (RandomValue(rngState) < fractionalSpawnRemainder) particleSpawnCount += 1;
-
-        if (particleSpawnCount > 0)
-        {
-            uint particleIndex;
-            InterlockedAdd(WhiteParticleCounters[0], (uint)particleSpawnCount, particleIndex);
-            particleSpawnCount = min(particleSpawnCount, MaxWhiteParticleCount - particleIndex - 1);
-
-            float3 cylinderBase = pos;
-            float3 cylinderTop = pos + velocityNew * deltaTime;
-            float3 cylinderAxisA = CalculateOrthonormal(velocityNew);
-            float3 cylinderAxisB = normalize(cross(cylinderAxisA, velocityNew));
-            float cylinderRadius = smoothingRadius;
-
-            for (int spawnIndex = 0; spawnIndex < particleSpawnCount; spawnIndex++)
-            {
-                float randomAngle = RandomValue(rngState) * 2 * 3.1415;
-                float3 offsetDir = cos(randomAngle) * cylinderAxisA + sin(randomAngle) * cylinderAxisB;
-                float3 baseOffset = sqrt(RandomValue(rngState)) * cylinderRadius * offsetDir;
-                float3 spawnPos = cylinderBase + baseOffset + (cylinderTop - cylinderBase) * RandomValue(rngState);
-
-                float dissolveTimeMin = 5;
-                float dissolveTimeMax = 15;
-                float lifetime = lerp(dissolveTimeMin, dissolveTimeMax, RandomValue(rngState));
-
-                WhiteParticle whiteParticle;
-                whiteParticle.position = spawnPos;
-                whiteParticle.velocity = velocityNew + baseOffset;
-                whiteParticle.remainingLifetime = lifetime;
-                whiteParticle.scale = (bubbleScale + 1) / 2;
-                WhiteParticles[particleIndex + spawnIndex] = whiteParticle;
-            }
-        }
     }
 }
 
@@ -1011,125 +924,5 @@ void SplatDensityFromParticles(uint3 id : SV_DispatchThreadID)
                 }
             }
         }
-    }
-
-}
-
-[numthreads(ThreadGroupSize, 1, 1)]
-void UpdateWhiteParticles(uint3 id : SV_DispatchThreadID)
-{
-    // Early exit if thread index exceeds particle count
-    if (id.x >= min(MaxWhiteParticleCount, WhiteParticleCounters[0])) return;
-
-    // Update particle
-    float deltaTime = whiteParticleDeltaTime;
-    WhiteParticle particle = WhiteParticles[id.x];
-
-    // -- Neighbour fluid partices ---
-    int3 originCell = GetCell3D(particle.position, smoothingRadius);
-    float sqrRadius = smoothingRadius * smoothingRadius;
-    int neighbourCount = 0;
-    float3 velocitySum = 0;
-    float weightSum = 0;
-
-    for (int i = 0; i < 27; i++)
-    {
-        uint hash = HashCell3D(originCell + offsets3D[i]);
-        uint key = KeyFromHash(hash, numParticles);
-        uint currIndex = SpatialOffsets[key];
-
-        while (currIndex < numParticles)
-        {
-            uint neighbourIndex = currIndex;
-            currIndex++;
-
-            uint neighbourKey = SpatialKeys[neighbourIndex];
-            // Exit if no longer looking at correct bin
-            if (neighbourKey != key)
-                break;
-
-            float3 neighbourPos = PredictedPositions[neighbourIndex];
-            float3 offsetToNeighbour = neighbourPos - particle.position;
-            float sqrDstToNeighbour = dot(offsetToNeighbour, offsetToNeighbour);
-
-            if (sqrDstToNeighbour < sqrRadius)
-            {
-                float dstToNeighbour = sqrt(sqrDstToNeighbour);
-                float influenceWeight = SmoothingKernelPoly6(dstToNeighbour, smoothingRadius);
-
-                // Add up velocities of nearby fluid particles, weighted smoothly by distance.
-                // Also add up the weights so that we can compute the average fluid velocity.
-                velocitySum += Velocities[neighbourIndex] * influenceWeight;
-                weightSum += influenceWeight;
-
-                neighbourCount += 1;
-            }
-        }
-    }
-
-    // -- Classify --
-    bool isSpray = neighbourCount <= sprayClassifyMaxNeighbours;
-    bool isBubble = neighbourCount >= bubbleClassifyMinNeighbours;
-    bool isFoam = !(isSpray || isBubble);
-
-    // Foam is transported by the fluid
-    if (isFoam)
-    {
-        // We want the foam to be carried by the fluid (not just accelerated by it),
-        // so the velocity is directly set to the average velocity of surrounding fluid.
-        particle.velocity = velocitySum / weightSum;
-        // Dissolve the foam over time
-        particle.remainingLifetime -= deltaTime;
-    }
-    // Bubbles are accelerated by the surrounding fluid, and moved upwards due to buoyancy
-    else if (isBubble)
-    {
-        const float fluidAccelMul = 3; // How fast the bubble accelerates to match velocity with fluid
-        float3 accelerationBuoyancy = float3(0, gravity, 0) * (1 - bubbleBuoyancy);
-        float3 accelerationFluid = (velocitySum / weightSum - particle.velocity) * fluidAccelMul;
-        particle.velocity += (accelerationBuoyancy + accelerationFluid) * deltaTime;
-    }
-    // Spray is affected by gravity and drag
-    else if (isSpray)
-    {
-        const float dragMultiplier = 0.04;
-        float sqrSpeed = dot(particle.velocity, particle.velocity);
-        float3 drag = -normalize(particle.velocity) * sqrSpeed * dragMultiplier;
-        particle.velocity += (float3(0, gravity, 0) + drag) * deltaTime;
-    }
-
-    float targetScale = isBubble ? bubbleScale : 1;
-    particle.scale = lerp(particle.scale, targetScale, deltaTime * bubbleScaleChangeSpeed);
-    particle.position += particle.velocity * deltaTime;
-
-    const float collisionDampening = 0.1;
-    ResolveCollisions(particle.position, particle.velocity, collisionDampening);
-    WhiteParticles[id.x] = particle;
-
-    // Compact the surviving particles into temporary buffer
-    if (particle.remainingLifetime > 0)
-    {
-        uint survivorIndex;
-        InterlockedAdd(WhiteParticleCounters[1], 1, survivorIndex);
-        WhiteParticlesCompacted[survivorIndex] = particle;
-    }
-}
-
-
-[numthreads(ThreadGroupSize, 1, 1)]
-void WhiteParticlePrepareNextFrame(uint3 id : SV_DispatchThreadID)
-{
-    if (id.x >= MaxWhiteParticleCount) return;
-
-    // Copy the surviving particles back into the main particle buffer
-    if (id.x < WhiteParticleCounters[1])
-    {
-        WhiteParticles[id.x] = WhiteParticlesCompacted[id.x];
-    }
-
-    // Set active particle count to the survivor count
-    if (id.x == 0)
-    {
-        WhiteParticleCounters[0] = WhiteParticleCounters[1];
     }
 }

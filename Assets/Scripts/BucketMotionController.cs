@@ -104,6 +104,26 @@ public sealed class BucketMotionController : MonoBehaviour
     public float InitialPitchAngularVelocity => _initialPitchAngularVelocity;
     public float InitialRollAngularVelocity => _initialRollAngularVelocity;
 
+    public float InitialHingeAngle => _initialHingeAngle;
+    public float InitialPitchAngle => _initialPitchAngle;
+    public float InitialRollAngle => _initialRollAngle;
+
+    public void SetInitialOrientationAngles(
+        float forwardBackAngle,
+        float leftRightAngle,
+        float ropeTwistAngle,
+        float hingeAngle,
+        float pitchAngle,
+        float rollAngle)
+    {
+        _initialForwardBackSwingAngle = Mathf.Clamp(forwardBackAngle, -85f, 85f);
+        _initialLeftRightSwingAngle = Mathf.Clamp(leftRightAngle, -85f, 85f);
+
+        _initialRopeTwistAngle = Mathf.Clamp(ropeTwistAngle, -180f, 180f);
+        _initialHingeAngle = Mathf.Clamp(hingeAngle, -180f, 180f);
+        _initialPitchAngle = Mathf.Clamp(pitchAngle, -180f, 180f);
+        _initialRollAngle = Mathf.Clamp(rollAngle, -180f, 180f);
+    }
     public void SetBucketMass(float mass)
     {
         _bucketMass = Mathf.Max(0.01f, mass);

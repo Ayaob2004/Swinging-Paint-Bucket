@@ -38,6 +38,18 @@ public class SimulationUIController : MonoBehaviour
     [SerializeField] private Slider leftRightAngleSlider;
     [SerializeField] private TMP_Text leftRightAngleValueText;
 
+    [SerializeField] private Slider ropeTwistAngleSlider;
+    [SerializeField] private TMP_Text ropeTwistAngleValueText;
+
+    [SerializeField] private Slider hingeAngleSlider;
+    [SerializeField] private TMP_Text hingeAngleValueText;
+
+    [SerializeField] private Slider pitchAngleSlider;
+    [SerializeField] private TMP_Text pitchAngleValueText;
+
+    [SerializeField] private Slider rollAngleSlider;
+    [SerializeField] private TMP_Text rollAngleValueText;
+
     [SerializeField] private TMP_InputField velocityXInput;
     [SerializeField] private TMP_InputField velocityYInput;
     [SerializeField] private TMP_InputField velocityZInput;
@@ -167,6 +179,12 @@ public class SimulationUIController : MonoBehaviour
         AddSliderListener(bucketMassSlider, _ => RefreshAllValueLabels());
         AddSliderListener(forwardBackAngleSlider, _ => RefreshAllValueLabels());
         AddSliderListener(leftRightAngleSlider, _ => RefreshAllValueLabels());
+
+        AddSliderListener(ropeTwistAngleSlider, _ => RefreshAllValueLabels());
+        AddSliderListener(hingeAngleSlider, _ => RefreshAllValueLabels());
+        AddSliderListener(pitchAngleSlider, _ => RefreshAllValueLabels());
+        AddSliderListener(rollAngleSlider, _ => RefreshAllValueLabels());
+
         AddSliderListener(gravitySlider, _ => RefreshAllValueLabels());
         AddSliderListener(viscositySlider, _ => RefreshAllValueLabels());
         AddSliderListener(particleDensitySlider, _ => RefreshAllValueLabels());
@@ -201,6 +219,12 @@ public class SimulationUIController : MonoBehaviour
         RemoveAllSliderListeners(bucketMassSlider);
         RemoveAllSliderListeners(forwardBackAngleSlider);
         RemoveAllSliderListeners(leftRightAngleSlider);
+
+        RemoveAllSliderListeners(ropeTwistAngleSlider);
+        RemoveAllSliderListeners(hingeAngleSlider);
+        RemoveAllSliderListeners(pitchAngleSlider);
+        RemoveAllSliderListeners(rollAngleSlider);
+
         RemoveAllSliderListeners(gravitySlider);
         RemoveAllSliderListeners(viscositySlider);
         RemoveAllSliderListeners(particleDensitySlider);
@@ -320,8 +344,13 @@ public class SimulationUIController : MonoBehaviour
         if (bucketMotion != null)
         {
             SetSliderValueSilent(bucketMassSlider, bucketMotion.BucketMass);
+
             SetSliderValueSilent(forwardBackAngleSlider, bucketMotion.InitialForwardBackSwingAngle);
             SetSliderValueSilent(leftRightAngleSlider, bucketMotion.InitialLeftRightSwingAngle);
+            SetSliderValueSilent(ropeTwistAngleSlider, bucketMotion.InitialRopeTwistAngle);
+            SetSliderValueSilent(hingeAngleSlider, bucketMotion.InitialHingeAngle);
+            SetSliderValueSilent(pitchAngleSlider, bucketMotion.InitialPitchAngle);
+            SetSliderValueSilent(rollAngleSlider, bucketMotion.InitialRollAngle);
 
             SetInputText(velocityXInput, bucketMotion.InitialLinearVelocity.x);
             SetInputText(velocityYInput, bucketMotion.InitialLinearVelocity.y);
@@ -405,15 +434,52 @@ public class SimulationUIController : MonoBehaviour
         if (bucketMotion != null)
         {
             float mass = GetSliderValue(bucketMassSlider, bucketMotion.BucketMass);
-            float forwardBack = GetSliderValue(forwardBackAngleSlider, bucketMotion.InitialForwardBackSwingAngle);
-            float leftRight = GetSliderValue(leftRightAngleSlider, bucketMotion.InitialLeftRightSwingAngle);
+
+            float forwardBack = GetSliderValue(
+                forwardBackAngleSlider,
+                bucketMotion.InitialForwardBackSwingAngle
+            );
+
+            float leftRight = GetSliderValue(
+                leftRightAngleSlider,
+                bucketMotion.InitialLeftRightSwingAngle
+            );
+
+            float ropeTwist = GetSliderValue(
+                ropeTwistAngleSlider,
+                bucketMotion.InitialRopeTwistAngle
+            );
+
+            float hinge = GetSliderValue(
+                hingeAngleSlider,
+                bucketMotion.InitialHingeAngle
+            );
+
+            float pitch = GetSliderValue(
+                pitchAngleSlider,
+                bucketMotion.InitialPitchAngle
+            );
+
+            float roll = GetSliderValue(
+                rollAngleSlider,
+                bucketMotion.InitialRollAngle
+            );
 
             float vx = GetInputFloat(velocityXInput, bucketMotion.InitialLinearVelocity.x);
             float vy = GetInputFloat(velocityYInput, bucketMotion.InitialLinearVelocity.y);
             float vz = GetInputFloat(velocityZInput, bucketMotion.InitialLinearVelocity.z);
 
             bucketMotion.SetBucketMass(mass);
-            bucketMotion.SetInitialSwingAngles(forwardBack, leftRight);
+
+            bucketMotion.SetInitialOrientationAngles(
+                forwardBack,
+                leftRight,
+                ropeTwist,
+                hinge,
+                pitch,
+                roll
+            );
+
             bucketMotion.SetInitialLinearVelocity(new Vector3(vx, vy, vz));
         }
     }
@@ -590,7 +656,25 @@ public class SimulationUIController : MonoBehaviour
             leftRightAngleValueText,
             "Left/Right Angle: " + GetSliderValue(leftRightAngleSlider, 0f).ToString("0.0") + "°"
         );
+        SetText(
+            ropeTwistAngleValueText,
+            "Rope Twist Angle: " + GetSliderValue(ropeTwistAngleSlider, 0f).ToString("0.0") + "°"
+        );
 
+        SetText(
+            hingeAngleValueText,
+            "Hinge Angle: " + GetSliderValue(hingeAngleSlider, 0f).ToString("0.0") + "°"
+        );
+
+        SetText(
+            pitchAngleValueText,
+            "Pitch Angle: " + GetSliderValue(pitchAngleSlider, 0f).ToString("0.0") + "°"
+        );
+
+        SetText(
+            rollAngleValueText,
+            "Roll Angle: " + GetSliderValue(rollAngleSlider, 0f).ToString("0.0") + "°"
+        );
         SetText(
             gravityValueText,
             "Gravity: " + GetSliderValue(gravitySlider, 0f).ToString("0.00")

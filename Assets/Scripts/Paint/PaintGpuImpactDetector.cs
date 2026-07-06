@@ -18,7 +18,6 @@ public class PaintGpuImpactDetector : MonoBehaviour
     [Header("Detection")]
     public bool enableDetection = true;
 
-    [Tooltip("ننفذ الكشف كل N frames لتخفيف الضغط.")]
     [Min(1)]
     public int checkEveryNFrames = 2;
 
@@ -27,17 +26,14 @@ public class PaintGpuImpactDetector : MonoBehaviour
     public float minImpactSpeed = 0.35f;
 
     [Header("Inclined Canvas Model")]
-    [Tooltip("إذا مفعّل، يأخذ زاوية الميلان من هذه القيم بدل حسابها من دوران اللوحة.")]
     public bool useManualIncline = true;
 
     [Range(0f, 75f)]
     public float inclineAngleDegrees = 0f;
 
-    [Tooltip("اتجاه النزول على UV. 0 يعني باتجاه +U، 90 يعني باتجاه +V.")]
     [Range(0f, 360f)]
     public float downhillDirectionDegrees = 90f;
 
-    [Tooltip("إذا مفعّل، يطبّق الميلان على دوران اللوحة نفسها في المشهد.")]
     public bool applyInclineToCanvasTransform = false;
 
     public enum InclineRotationAxis
