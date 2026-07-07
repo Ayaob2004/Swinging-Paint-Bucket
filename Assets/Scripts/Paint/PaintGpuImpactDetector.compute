@@ -188,9 +188,11 @@ void DetectCanvasImpacts(uint3 id : SV_DispatchThreadID)
         currSigned = currLocal.z + localSurfaceOffset;
     }
 
-    bool crossed =
-        (prevSigned > 0.0 && currSigned <= 0.0) ||
-        (prevSigned < 0.0 && currSigned >= 0.0);
+    //bool crossed =
+        //(prevSigned > 0.0 && currSigned <= 0.0) ||
+        //(prevSigned < 0.0 && currSigned >= 0.0);
+    
+    bool crossed = (prevSigned > 0.0 && currSigned <= 0.0);
 
     if (!crossed)
     {
@@ -257,6 +259,7 @@ void DetectCanvasImpacts(uint3 id : SV_DispatchThreadID)
     // Inclined surfaces produce asymmetric spreading.
     // We slightly reduce the circular impact energy but stretch downhill.
     baseRadius *= lerp(1.0, 0.88, incline01);
+    baseRadius *= 0.22;
     baseRadius = clamp(baseRadius, 0.004, 0.2);
 
     float splashStrength =
